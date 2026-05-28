@@ -3,6 +3,7 @@ const {
   createProduct,
   listProducts,
   searchProducts,
+  getProductByBarcode,
   getProduct,
   updateProduct,
   deleteProduct
@@ -12,6 +13,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const router = express.Router();
 
 router.get("/search", requireAuth, searchProducts);
+router.get("/barcode/:barcode", requireAuth, getProductByBarcode);
 router.get("/", requireAuth, listProducts);
 router.post("/", requireAuth, requireRole(["admin", "manager"]), createProduct);
 router.get("/:id", requireAuth, getProduct);

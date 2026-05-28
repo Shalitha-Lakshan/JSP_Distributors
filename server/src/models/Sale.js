@@ -6,7 +6,9 @@ const usedBatchSchema = new mongoose.Schema(
     batchNo: { type: String, required: true },
     qty: { type: Number, required: true, min: 0 },
     billingPrice: { type: Number, required: true, min: 0 },
-    lineTotal: { type: Number, required: true, min: 0 }
+    sellingPrice: { type: Number, required: true, min: 0 },
+    lineTotal: { type: Number, required: true, min: 0 },
+    sellingLineTotal: { type: Number, required: true, min: 0 }
   },
   { _id: false }
 );
@@ -47,6 +49,7 @@ const returnItemSchema = new mongoose.Schema(
 const saleSchema = new mongoose.Schema(
   {
     invoiceNo: { type: String, required: true, unique: true },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: "Order" },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer" },
     cashier: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     items: { type: [saleItemSchema], default: [] },

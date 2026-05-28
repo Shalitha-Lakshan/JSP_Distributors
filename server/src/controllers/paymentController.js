@@ -10,14 +10,18 @@ const receivePayment = async (req, res) => {
 };
 
 const listPayments = async (_req, res) => {
-  const payments = await Payment.find().sort({ createdAt: -1 });
+  const payments = await Payment.find()
+    .sort({ createdAt: -1 })
+    .populate("customer", "name")
+    .populate("receivedBy", "name");
   return res.json(payments);
 };
 
 const listPaymentsByCustomer = async (req, res) => {
-  const payments = await Payment.find({ customer: req.params.customerId }).sort({
-    createdAt: -1
-  });
+  const payments = await Payment.find({ customer: req.params.customerId })
+    .sort({ createdAt: -1 })
+    .populate("customer", "name")
+    .populate("receivedBy", "name");
   return res.json(payments);
 };
 
