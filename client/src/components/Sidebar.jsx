@@ -23,7 +23,8 @@ const getNavItems = (role) => {
       { label: "Stock Add", to: "/stock/add" },
       { label: "Stock Batches", to: "/stock/batches" },
       { label: "Customers", to: "/customers" },
-      { label: "Reports", to: "/reports" }
+      { label: "Reports", to: "/reports" },
+      { label: "Daily Closing", to: "/reports/daily-closing" }
     );
   }
 

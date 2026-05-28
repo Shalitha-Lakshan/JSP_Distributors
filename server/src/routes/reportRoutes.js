@@ -5,7 +5,8 @@ const {
   getItemWise,
   getCustomerWise,
   getCreditOutstanding,
-  getPaymentCollections
+  getPaymentCollections,
+  getManagerDashboard
 } = require("../controllers/reportController");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
@@ -17,5 +18,11 @@ router.get("/item-wise", requireAuth, requireRole(["admin", "manager"]), getItem
 router.get("/customer-wise", requireAuth, requireRole(["admin", "manager"]), getCustomerWise);
 router.get("/credit-outstanding", requireAuth, requireRole(["admin", "manager"]), getCreditOutstanding);
 router.get("/payment-collections", requireAuth, requireRole(["admin", "manager"]), getPaymentCollections);
+router.get(
+  "/manager-dashboard",
+  requireAuth,
+  requireRole(["admin", "manager"]),
+  getManagerDashboard
+);
 
 module.exports = router;
