@@ -8,37 +8,46 @@ const getCurrentRole = () => {
 };
 
 const getNavItems = (role) => {
-  const dashboardItem =
-    role === "manager"
-      ? { label: "Manager Dashboard", to: "/dashboard/manager" }
-      : role === "admin"
-        ? { label: "Admin Dashboard", to: "/dashboard/admin" }
-        : { label: "POS Billing", to: "/pos" };
+  if (role === "manager") {
+    return [
+      { label: "Manager Dashboard", to: "/dashboard/manager" },
+      { label: "POS Billing", to: "/pos" },
+      { label: "Products", to: "/products" },
+      { label: "Stock Add", to: "/stock/add" },
+      { label: "Stock Batches", to: "/stock/batches" },
+      { label: "Low Stock", to: "/products?filter=low-stock" },
+      { label: "Near Expiry", to: "/stock/batches?filter=near-expiry" },
+      { label: "Customers", to: "/customers" },
+      { label: "Customer Ledger", to: "/customers?tab=ledger" },
+      { label: "Payments", to: "/payments" },
+      { label: "Sales History", to: "/sales" },
+      { label: "Reports", to: "/reports" },
+      { label: "Return Reports", to: "/reports?tab=returns" },
+      { label: "Daily Closing", to: "/reports/daily-closing" }
+    ];
+  }
 
-  const items = [dashboardItem];
-
-  if (role !== "cashier") {
-    items.push(
+  if (role === "admin") {
+    return [
+      { label: "Admin Dashboard", to: "/dashboard/admin" },
+      { label: "POS Billing", to: "/pos" },
       { label: "Products", to: "/products" },
       { label: "Stock Add", to: "/stock/add" },
       { label: "Stock Batches", to: "/stock/batches" },
       { label: "Customers", to: "/customers" },
+      { label: "Payments", to: "/payments" },
+      { label: "Sales History", to: "/sales" },
       { label: "Reports", to: "/reports" },
-      { label: "Daily Closing", to: "/reports/daily-closing" }
-    );
+      { label: "Daily Closing", to: "/reports/daily-closing" },
+      { label: "User Approvals", to: "/users" }
+    ];
   }
 
-  items.push(
+  return [
     { label: "POS Billing", to: "/pos" },
     { label: "Payments", to: "/payments" },
     { label: "Sales History", to: "/sales" }
-  );
-
-  if (role === "admin") {
-    items.push({ label: "Users", to: "/users" });
-  }
-
-  return items;
+  ];
 };
 
 const getStoredUser = () => {

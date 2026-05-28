@@ -7,7 +7,17 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, trim: true },
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ["admin", "manager", "cashier"], default: "cashier" },
-    status: { type: String, enum: ["active", "inactive"], default: "active" }
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending"
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    approvedAt: { type: Date },
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    rejectedAt: { type: Date },
+    rejectionReason: { type: String, trim: true },
+    status: { type: String, enum: ["active", "inactive"], default: "inactive" }
   },
   { timestamps: true }
 );

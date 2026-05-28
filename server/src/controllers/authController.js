@@ -32,18 +32,18 @@ const register = async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await User.create({
+  await User.create({
     name,
     email: email.toLowerCase(),
     phone,
     passwordHash,
-    role: role || "cashier"
+    role: role || "cashier",
+    approvalStatus: "pending",
+    status: "inactive"
   });
 
-  const token = buildToken(user);
   return res.status(201).json({
-    token,
-    user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    message: "Registration submitted successfully. Please wait for admin approval."
   });
 };
 
@@ -64,10 +64,47 @@ const login = async (req, res) => {
     return res.status(401).json({ message: "Invalid credentials" });
   }
 
+  if (user.role === "admin") {
+    const token = buildToken(user);
+    return res.json({
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        approvalStatus: user.approvalStatus || "approved",
+        status: user.status || "active"
+      }
+    });
+  }
+
+  const approvalStatus = user.approvalStatus || "approved";
+  const accountStatus = user.status || "active";
+
+  if (approvalStatus === "pending") {
+    return res.status(403).json({ message: "Your account is pending admin approval." });
+  }
+
+  if (approvalStatus === "rejected") {
+    return res.status(403).json({ message: "Your account request has been rejected." });
+  }
+
+  if (accountStatus !== "active") {
+    return res.status(403).json({ message: "Your account is inactive. Please contact admin." });
+  }
+
   const token = buildToken(user);
   return res.json({
     token,
-    user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      approvalStatus: approvalStatus,
+      status: accountStatus
+    }
   });
 };
 

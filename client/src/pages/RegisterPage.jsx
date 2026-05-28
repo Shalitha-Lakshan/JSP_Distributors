@@ -52,6 +52,10 @@ const RegisterPage = () => {
       });
 
       localStorage.setItem("pendingEmail", form.email);
+      localStorage.setItem(
+        "authMessage",
+        data.message || "Registration submitted successfully. Please wait for admin approval."
+      );
       navigate("/login");
     } catch (err) {
       const message = err.response?.data?.message || "Registration failed";

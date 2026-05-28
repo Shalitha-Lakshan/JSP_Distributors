@@ -8,6 +8,7 @@ const salesRoutes = require("./routes/salesRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const customerRoutes = require("./routes/customerRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const userRoutes = require("./routes/userRoutes");
 const notFound = require("./middleware/notFound");
 const errorHandler = require("./middleware/errorHandler");
 
@@ -28,6 +29,7 @@ app.use("/api/sales", salesRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/users", userRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
