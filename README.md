@@ -14,9 +14,6 @@ Single-repo MERN scaffolding for a POS, billing, inventory, FIFO batch, credit, 
 4. Start development servers:
    - `npm run dev`
 
-## Default Admin
-- Email: admin@jsp.com
-- Password: admin@123
 
 ## Scripts
 - `npm run dev` - start client and server
