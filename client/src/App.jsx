@@ -17,13 +17,20 @@ import InvoicePage from "./pages/InvoicePage";
 import DailyClosingPage from "./pages/DailyClosingPage";
 import ReportsPage from "./pages/ReportsPage";
 import UsersPage from "./pages/UsersPage";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 const App = () => (
   <Routes>
     <Route path="/" element={<HomePage />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/register" element={<RegisterPage />} />
-    <Route element={<MainLayout />}>
+    <Route
+      element={
+        <ProtectedRoute>
+          <MainLayout />
+        </ProtectedRoute>
+      }
+    >
       <Route path="/dashboard/admin" element={<AdminDashboardPage />} />
       <Route path="/dashboard/manager" element={<ManagerDashboardPage />} />
       <Route path="/pos" element={<PosPage />} />
@@ -37,7 +44,14 @@ const App = () => (
       <Route path="/invoices/:invoiceNo" element={<InvoicePage />} />
       <Route path="/reports/daily-closing" element={<DailyClosingPage />} />
       <Route path="/reports" element={<ReportsPage />} />
-      <Route path="/users" element={<UsersPage />} />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute allowedRoles={["admin"]}>
+            <UsersPage />
+          </ProtectedRoute>
+        }
+      />
     </Route>
   </Routes>
 );

@@ -31,6 +31,7 @@ const seedAdmin = async () => {
     email,
     passwordHash,
     role: "admin",
+    approvalStatus: "approved",
     status: "active"
   });
 

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import api from "../api/client";
 
 const getRedirectPath = (role) => {
@@ -14,12 +14,22 @@ const getRedirectPath = (role) => {
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState({
     email: localStorage.getItem("pendingEmail") || "",
     password: ""
   });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const message = location.state?.message || localStorage.getItem("authMessage");
+    if (message) {
+      setNotice(message);
+      localStorage.removeItem("authMessage");
+    }
+  }, [location.state]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -135,6 +145,11 @@ const LoginPage = () => {
                 Forgot password?
               </button>
             </div>
+            {notice && (
+              <div className="rounded-xl border border-leaf/30 bg-leaf/10 px-4 py-3 text-sm text-leaf">
+                {notice}
+              </div>
+            )}
             {error && (
               <div className="rounded-xl border border-clay/30 bg-clay/10 px-4 py-3 text-sm text-clay">
                 {error}

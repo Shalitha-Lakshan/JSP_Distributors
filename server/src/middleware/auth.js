@@ -17,6 +17,26 @@ const requireAuth = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    if (user.role === "admin") {
+      req.user = user;
+      return next();
+    }
+
+    const approvalStatus = user.approvalStatus || "approved";
+    const accountStatus = user.status || "active";
+
+    if (approvalStatus === "rejected") {
+      return res.status(403).json({ message: "Your account request has been rejected." });
+    }
+
+    if (approvalStatus !== "approved") {
+      return res.status(403).json({ message: "Your account is pending admin approval." });
+    }
+
+    if (accountStatus !== "active") {
+      return res.status(403).json({ message: "Your account is inactive. Please contact admin." });
+    }
+
     req.user = user;
     return next();
   } catch (error) {
