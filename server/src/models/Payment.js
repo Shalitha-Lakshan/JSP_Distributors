@@ -15,6 +15,10 @@ const paymentSchema = new mongoose.Schema(
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true },
     amount: { type: Number, required: true, min: 0 },
     paymentMethod: { type: String, default: "cash" },
+    chequeNo: { type: String, trim: true },
+    bankName: { type: String, trim: true },
+    chequeDate: { type: Date },
+    chequeStatus: { type: String, enum: ["pending", "cleared", "returned"] },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     note: { type: String, trim: true },
     allocations: { type: [allocationSchema], default: [] }

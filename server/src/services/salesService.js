@@ -12,7 +12,8 @@ const createSaleFromPayload = async ({
   customer,
   saleType = "walk-in",
   cashierId,
-  orderId
+  orderId,
+  skipProductStockUpdate = false
 }) => {
   if (!items.length) {
     throw new Error("No items provided");
@@ -108,8 +109,10 @@ const createSaleFromPayload = async ({
     await StockBatch.bulkWrite(batchUpdates);
   }
 
-  for (const [productId, qty] of productStockUpdates.entries()) {
-    await Product.findByIdAndUpdate(productId, { $inc: { totalStock: -qty } });
+  if (!skipProductStockUpdate) {
+    for (const [productId, qty] of productStockUpdates.entries()) {
+      await Product.findByIdAndUpdate(productId, { $inc: { totalStock: -qty } });
+    }
   }
 
   const orderTotal = normalizedItems.reduce((sum, item) => sum + (item.lineTotal || 0), 0);

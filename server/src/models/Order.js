@@ -34,6 +34,7 @@ const orderSchema = new mongoose.Schema(
       enum: ["not_collected", "paid", "partial", "credit"],
       default: "not_collected"
     },
+    stockReserved: { type: Boolean, default: false },
     deliveryDate: { type: Date },
     saleId: { type: mongoose.Schema.Types.ObjectId, ref: "Sale" }
   },

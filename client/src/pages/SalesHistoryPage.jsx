@@ -3,6 +3,63 @@ import api from "../api/client";
 
 const formatCurrency = (value) => `Rs. ${Number(value || 0).toLocaleString("en-LK")}`;
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString("en-LK") : "-");
+const formatDateTime = (value) =>
+  value
+    ? new Date(value).toLocaleString("en-LK", { hour: "2-digit", minute: "2-digit" })
+    : "-";
+
+const IconEye = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+    <path
+      d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
+      strokeWidth="1.5"
+    />
+    <circle cx="12" cy="12" r="3" strokeWidth="1.5" />
+  </svg>
+);
+
+const IconEdit = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+    <path
+      d="M4 20h4l10-10-4-4L4 16v4Z"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <path d="M14 6l4 4" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const IconTruck = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+    <path d="M2 7h12v9H2z" strokeWidth="1.5" />
+    <path d="M14 10h5l3 3v3h-8" strokeWidth="1.5" />
+    <circle cx="7" cy="18" r="2" strokeWidth="1.5" />
+    <circle cx="17" cy="18" r="2" strokeWidth="1.5" />
+  </svg>
+);
+
+const IconBan = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+    <circle cx="12" cy="12" r="9" strokeWidth="1.5" />
+    <path d="M7 7l10 10" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+    <path d="M4 7h16" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M9 7V5h6v2" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M7 7l1 12h8l1-12" strokeWidth="1.5" strokeLinejoin="round" />
+  </svg>
+);
+
+const IconPrint = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+    <path d="M7 8V4h10v4" strokeWidth="1.5" strokeLinecap="round" />
+    <rect x="6" y="12" width="12" height="8" rx="1" strokeWidth="1.5" />
+    <path d="M6 12H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2" strokeWidth="1.5" />
+  </svg>
+);
 
 const SalesHistoryPage = () => {
   const [orders, setOrders] = useState([]);
@@ -11,6 +68,16 @@ const SalesHistoryPage = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [mode, setMode] = useState("");
   const [editItems, setEditItems] = useState([]);
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [editSearch, setEditSearch] = useState("");
+  const [editSuggestions, setEditSuggestions] = useState([]);
+  const [editForm, setEditForm] = useState({
+    productId: "",
+    itemCode: "",
+    itemName: "",
+    unitPrice: 0,
+    quantity: ""
+  });
   const [deliveryItems, setDeliveryItems] = useState([]);
   const [hasReturns, setHasReturns] = useState(false);
   const [returns, setReturns] = useState([]);
@@ -26,6 +93,7 @@ const SalesHistoryPage = () => {
   const [returnSuggestions, setReturnSuggestions] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paidAmount, setPaidAmount] = useState(0);
+  const [discountPercent, setDiscountPercent] = useState(0);
   const [saving, setSaving] = useState(false);
 
   const authHeader = useMemo(() => {
@@ -71,6 +139,16 @@ const SalesHistoryPage = () => {
     setSelectedOrder(null);
     setMode("");
     setEditItems([]);
+    setShowAddItem(false);
+    setEditSearch("");
+    setEditSuggestions([]);
+    setEditForm({
+      productId: "",
+      itemCode: "",
+      itemName: "",
+      unitPrice: 0,
+      quantity: ""
+    });
     setDeliveryItems([]);
     setHasReturns(false);
     setReturns([]);
@@ -86,6 +164,7 @@ const SalesHistoryPage = () => {
     setReturnSuggestions([]);
     setPaymentMethod("cash");
     setPaidAmount(0);
+    setDiscountPercent(0);
   };
 
   const openView = (order) => {
@@ -96,6 +175,16 @@ const SalesHistoryPage = () => {
   const openEdit = (order) => {
     setSelectedOrder(order);
     setMode("edit");
+    setShowAddItem(false);
+    setEditSearch("");
+    setEditSuggestions([]);
+    setEditForm({
+      productId: "",
+      itemCode: "",
+      itemName: "",
+      unitPrice: 0,
+      quantity: ""
+    });
     setEditItems(order.items.map((item) => ({
       productId: item.productId,
       itemCode: item.itemCode,
@@ -121,6 +210,7 @@ const SalesHistoryPage = () => {
       setPaymentMethod("cash");
       setPaidAmount(order.orderTotal || 0);
     }
+    setDiscountPercent(0);
   };
 
   const updateEditQty = (index, nextQty) => {
@@ -173,6 +263,28 @@ const SalesHistoryPage = () => {
     runSearch();
   }, [returnSearch]);
 
+  useEffect(() => {
+    const runEditSearch = async () => {
+      const query = editSearch.trim();
+      if (!query) {
+        setEditSuggestions([]);
+        return;
+      }
+
+      try {
+        const { data } = await api.get("/api/products/search", {
+          headers: authHeader,
+          params: { q: query }
+        });
+        setEditSuggestions(data || []);
+      } catch {
+        setEditSuggestions([]);
+      }
+    };
+
+    runEditSearch();
+  }, [editSearch]);
+
   const handleSelectReturnProduct = (product) => {
     setReturnForm((prev) => ({
       ...prev,
@@ -180,6 +292,73 @@ const SalesHistoryPage = () => {
     }));
     setReturnSearch(`${product.itemCode} - ${product.displayName}`);
     setReturnSuggestions([]);
+  };
+
+  const handleSelectEditProduct = (product) => {
+    setEditForm({
+      productId: product._id,
+      itemCode: product.itemCode,
+      itemName: product.displayName,
+      unitPrice: Number(product.currentSellingPrice || 0),
+      quantity: "1"
+    });
+    setEditSearch(`${product.itemCode} - ${product.displayName}`);
+    setEditSuggestions([]);
+  };
+
+  const handleEditFormChange = (event) => {
+    const { name, value } = event.target;
+    setEditForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const addEditItem = () => {
+    if (!editForm.productId || !editForm.quantity) {
+      setError("Select an item and quantity to add.");
+      return;
+    }
+
+    const qty = Number(editForm.quantity);
+    if (qty <= 0) {
+      setError("Quantity must be greater than 0.");
+      return;
+    }
+
+    setEditItems((prev) => {
+      const existing = prev.find((item) => item.productId === editForm.productId);
+      if (existing) {
+        return prev.map((item) =>
+          item.productId === editForm.productId
+            ? {
+                ...item,
+                quantity: item.quantity + qty,
+                lineTotal: (item.quantity + qty) * item.unitPrice
+              }
+            : item
+        );
+      }
+
+      return [
+        ...prev,
+        {
+          productId: editForm.productId,
+          itemCode: editForm.itemCode,
+          itemName: editForm.itemName,
+          quantity: qty,
+          unitPrice: editForm.unitPrice,
+          lineTotal: qty * editForm.unitPrice
+        }
+      ];
+    });
+
+    setEditForm({
+      productId: "",
+      itemCode: "",
+      itemName: "",
+      unitPrice: 0,
+      quantity: ""
+    });
+    setEditSearch("");
+    setShowAddItem(false);
   };
 
   const handleReturnChange = (event) => {
@@ -256,6 +435,186 @@ const SalesHistoryPage = () => {
     }
   };
 
+  const handleDeleteOrder = async (order) => {
+    const confirmed = window.confirm("Delete this cancelled order permanently?");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await api.delete(`/api/orders/${order._id}`, { headers: authHeader });
+      await loadOrders();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete order");
+    }
+  };
+
+  const handlePrintOrder = (order) => {
+    const printWindow = window.open("", "_blank", "width=900,height=900");
+    if (!printWindow) {
+      setError("Pop-up blocked. Allow pop-ups to print.");
+      return;
+    }
+
+    const itemsRows = (order.items || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.itemName || "-"}</td>
+            <td style="text-align:right;">${formatCurrency(item.unitPrice)}</td>
+            <td style="text-align:right;">${item.quantity || 0}</td>
+            <td style="text-align:right;">${formatCurrency(item.lineTotal)}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const logoUrl = `${window.location.origin}/logo.png`;
+    const customerName = order.customer?.name || "Walk-in";
+    const paymentStatus = order.paymentStatus?.replace("_", " ") || "-";
+    const orderStatus = order.orderStatus?.replace("_", " ") || "-";
+    const grossTotal = Number(order.orderTotal || 0);
+    const returnTotal = Number(order.returnTotal || 0);
+    const discountTotal = Number(order.discount || 0);
+    const netTotal = Math.max(grossTotal - returnTotal - discountTotal, 0);
+    const paidTotal = Number(order.paidAmount || 0);
+    const dueTotal = Math.max(netTotal - paidTotal, 0);
+    const paymentMethodLabel = order.paymentMethod
+      ? order.paymentMethod === "credit"
+        ? "Credit Bill"
+        : order.paymentMethod === "cheque"
+          ? "Cheque"
+          : "Cash"
+      : "-";
+    const paidLabel = order.paymentMethod === "credit" ? "Credit Bill Amount" : "Paid Amount";
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Order ${order.orderNo}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #111827; padding: 28px 32px; }
+            .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+            .brand { display: flex; align-items: center; gap: 12px; }
+            .brand img { height: 44px; width: 44px; }
+            .brand h1 { margin: 0; font-size: 20px; letter-spacing: 0.5px; }
+            .brand .meta { font-size: 12px; color: #374151; margin-top: 2px; }
+            .invoice-block { text-align: right; font-size: 12px; }
+            .invoice-block strong { display: block; font-size: 12px; letter-spacing: 0.5px; }
+            .divider { height: 1px; background: #e5e7eb; margin: 14px 0; }
+            .muted { color: #6b7280; font-size: 11px; }
+            .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+            .box { border: 1px solid #e5e7eb; padding: 10px 12px; border-radius: 6px; }
+            .box strong { font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px; font-size: 12px; }
+            th { text-align: left; background: #f8fafc; color: #6b7280; font-weight: 700; letter-spacing: 0.4px; }
+            .summary-card { margin-top: 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+            .summary-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+            .summary-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #e5e7eb; }
+            .summary-row:last-child { border-bottom: none; }
+            .summary-label { font-weight: 700; }
+            .summary-strong { font-size: 16px; font-weight: 800; }
+            .summary-negative { color: #b91c1c; }
+            .summary-due { color: #b91c1c; font-weight: 800; }
+            .summary-divider { height: 1px; background: #d1d5db; margin: 10px 0; }
+            .signatures { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 32px; }
+            .signature-line { border-top: 1px dotted #6b7280; padding-top: 6px; font-size: 11px; text-align: center; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">
+              <img src="${logoUrl}" alt="Logo" />
+              <div>
+                <h1>JSP DISTRIBUTORS</h1>
+                <div class="meta">130/B, Padavi - parackramapura</div>
+                <div class="meta">070 - 4407191</div>
+              </div>
+            </div>
+            <div class="invoice-block">
+              <strong>INVOICE #</strong>
+              <div>${order.orderNo}</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="grid">
+            <div class="box">
+              <div class="muted">Date</div>
+              <strong>${formatDate(order.createdAt)}</strong>
+              <div class="muted" style="margin-top:6px;">Time</div>
+              <strong>${formatDateTime(order.createdAt)}</strong>
+            </div>
+            <div class="box">
+              <div class="muted">Bill To</div>
+              <strong>${customerName}</strong>
+              <div class="muted" style="margin-top:6px;">Payment</div>
+              <strong>${paymentStatus}</strong>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width:46%;">ITEM DESCRIPTION</th>
+                <th style="width:18%; text-align:right;">PRICE</th>
+                <th style="width:12%; text-align:right;">QTY</th>
+                <th style="width:24%; text-align:right;">AMOUNT</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsRows || "<tr><td colspan=\"4\" class=\"muted\">No items</td></tr>"}
+            </tbody>
+          </table>
+
+          <div class="summary-card">
+            <div class="summary-title">Order Summary</div>
+            <div class="summary-row"><span class="summary-label">Gross Order Total</span><span>${formatCurrency(grossTotal)}</span></div>
+            <div class="summary-row"><span class="summary-label">Return Deductions</span><span class="summary-negative">-${formatCurrency(returnTotal)}</span></div>
+            <div class="summary-row"><span class="summary-label">Discount</span><span class="summary-negative">-${formatCurrency(discountTotal)}</span></div>
+            <div class="summary-divider"></div>
+            <div class="summary-row"><span class="summary-label">Net Payable</span><span class="summary-strong">${formatCurrency(netTotal)}</span></div>
+
+            <div class="summary-title" style="margin-top:10px;">Payment Summary</div>
+            <div class="summary-row"><span class="summary-label">Payment Method</span><span>${paymentMethodLabel}</span></div>
+            <div class="summary-row"><span class="summary-label">${paidLabel}</span><span>${formatCurrency(paidTotal)}</span></div>
+            <div class="summary-row"><span class="summary-label">Due Amount</span><span class="${dueTotal > 0 ? "summary-due" : ""}">${formatCurrency(dueTotal)}</span></div>
+          </div>
+
+          ${
+            order.paymentMethod === "cheque"
+              ? `
+                <div class="summary-card" style="margin-top:12px;">
+                  <div class="summary-title">Cheque Details</div>
+                  <div class="summary-row"><span class="summary-label">Cheque No</span><span>-</span></div>
+                  <div class="summary-row"><span class="summary-label">Bank Name</span><span>-</span></div>
+                  <div class="summary-row"><span class="summary-label">Cheque Date</span><span>-</span></div>
+                  <div class="summary-row"><span class="summary-label">Cheque Status</span><span>-</span></div>
+                </div>
+              `
+              : ""
+          }
+
+          <div class="signatures">
+            <div class="signature-line">Signature of Customer</div>
+            <div class="signature-line">Signature of Rep</div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
   const handleUpdateOrder = async () => {
     if (!selectedOrder) {
       return;
@@ -289,7 +648,9 @@ const SalesHistoryPage = () => {
 
     const orderTotal = deliveryItems.reduce((sum, item) => sum + item.lineTotal, 0);
     const returnTotal = returns.reduce((sum, item) => sum + item.returnTotal, 0);
-    const netTotal = Math.max(orderTotal - returnTotal, 0);
+    const baseTotal = Math.max(orderTotal - returnTotal, 0);
+    const discountAmount = Math.max((baseTotal * Number(discountPercent || 0)) / 100, 0);
+    const netTotal = Math.max(baseTotal - discountAmount, 0);
     if (hasReturns && returnTotal > orderTotal) {
       setError("Return total cannot exceed order total.");
       return;
@@ -315,6 +676,7 @@ const SalesHistoryPage = () => {
             quantity: item.quantity
           })),
           returns: hasReturns ? returns : [],
+          discount: discountAmount,
           paidAmount: paymentMethod === "credit" ? 0 : Number(paidAmount || 0),
           paymentMethod
         },
@@ -351,55 +713,106 @@ const SalesHistoryPage = () => {
           {grouped.map(([date, items]) => (
             <div key={date} className="rounded-2xl bg-white/90 p-5 shadow">
               <div className="text-sm font-semibold text-ink/70">{date}</div>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {items.map((order) => (
                   <div
                     key={order._id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slatewash/60 px-3 py-2 text-sm"
+                    className="rounded-2xl border border-slatewash bg-slatewash/40 p-4 text-sm shadow-sm"
                   >
-                    <div className="font-semibold">{order.orderNo}</div>
-                    <div className="text-ink/70">{order.customer?.name || "Walk-in"}</div>
-                    <div className="text-ink/70">{formatDate(order.createdAt)}</div>
-                    <div className="text-ink/70">{formatDate(order.deliveryDate)}</div>
-                    <div className="text-ink/70">{formatCurrency(order.orderTotal)}</div>
-                    <div className="text-xs font-semibold uppercase text-ink/60">
-                      {order.orderStatus}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-ink/60">Order</div>
+                        <div className="text-lg font-semibold">{order.orderNo}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <span className="rounded-full bg-ink/10 px-3 py-1 text-xs font-semibold text-ink/70">
+                          {order.orderStatus.replace("_", " ")}
+                        </span>
+                        <span className="rounded-full bg-ink/10 px-3 py-1 text-xs font-semibold text-ink/70">
+                          {order.paymentStatus.replace("_", " ")}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-xs font-semibold uppercase text-ink/60">
-                      {order.paymentStatus}
+                    <div className="mt-3 grid gap-2 text-xs text-ink/70">
+                      <div className="flex items-center justify-between">
+                        <span>Customer</span>
+                        <span className="font-semibold">
+                          {order.customer?.name || "Walk-in"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Order Date</span>
+                        <span>{formatDate(order.createdAt)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Delivery Date</span>
+                        <span>{formatDate(order.deliveryDate)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Order Total</span>
+                        <span className="font-semibold">{formatCurrency(order.orderTotal)}</span>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2">
                       <button
-                        className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                        className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold"
                         type="button"
                         onClick={() => openView(order)}
+                        title="View"
+                        aria-label="View"
                       >
-                        View
+                        <IconEye />
+                      </button>
+                      <button
+                        className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold"
+                        type="button"
+                        onClick={() => handlePrintOrder(order)}
+                        title="Print"
+                        aria-label="Print"
+                      >
+                        <IconPrint />
                       </button>
                       {order.orderStatus === "pending_delivery" && (
                         <>
                           <button
-                            className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                            className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold"
                             type="button"
                             onClick={() => openEdit(order)}
+                            title="Edit order"
+                            aria-label="Edit order"
                           >
-                            Edit Order
+                            <IconEdit />
                           </button>
                           <button
-                            className="rounded-full bg-ink px-3 py-1 text-xs font-semibold text-sand"
+                            className="flex items-center rounded-full bg-ink p-2 text-xs font-semibold text-sand"
                             type="button"
                             onClick={() => openDeliver(order)}
+                            title="Deliver and collect payment"
+                            aria-label="Deliver and collect payment"
                           >
-                            Deliver & Collect Payment
+                            <IconTruck />
                           </button>
                           <button
-                            className="rounded-full border border-clay/40 px-3 py-1 text-xs font-semibold text-clay"
+                            className="flex items-center rounded-full border border-clay/40 p-2 text-xs font-semibold text-clay"
                             type="button"
                             onClick={() => handleCancelOrder(order)}
+                            title="Cancel"
+                            aria-label="Cancel"
                           >
-                            Cancel
+                            <IconBan />
                           </button>
                         </>
+                      )}
+                      {order.orderStatus === "cancelled" && (
+                        <button
+                          className="flex items-center rounded-full border border-clay/40 p-2 text-xs font-semibold text-clay"
+                          type="button"
+                          onClick={() => handleDeleteOrder(order)}
+                          title="Delete"
+                          aria-label="Delete"
+                        >
+                          <IconTrash />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -429,20 +842,152 @@ const SalesHistoryPage = () => {
             </div>
 
             {mode === "view" && (
-              <div className="mt-4 space-y-3">
-                {selectedOrder.items.map((item) => (
-                  <div key={item.itemCode} className="rounded-2xl bg-slatewash/60 p-3">
-                    <div className="font-semibold">{item.itemName}</div>
-                    <div className="text-xs text-ink/60">
-                      {item.quantity} x {formatCurrency(item.unitPrice)}
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl bg-slatewash/60 p-4">
+                    <div className="text-xs text-ink/60">Customer</div>
+                    <div className="text-sm font-semibold">
+                      {selectedOrder.customer?.name || "Walk-in"}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Order Date</div>
+                    <div className="text-sm font-semibold">
+                      {formatDate(selectedOrder.createdAt)}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Delivery Date</div>
+                    <div className="text-sm font-semibold">
+                      {formatDate(selectedOrder.deliveryDate)}
                     </div>
                   </div>
-                ))}
+                  <div className="rounded-2xl bg-slatewash/60 p-4">
+                    <div className="text-xs text-ink/60">Order Status</div>
+                    <div className="text-sm font-semibold">
+                      {selectedOrder.orderStatus.replace("_", " ")}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Payment Status</div>
+                    <div className="text-sm font-semibold">
+                      {selectedOrder.paymentStatus.replace("_", " ")}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Order Total</div>
+                    <div className="text-sm font-semibold">
+                      {formatCurrency(selectedOrder.orderTotal)}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-slatewash/60 p-4">
+                    <div className="text-xs text-ink/60">Returns</div>
+                    <div className="text-sm font-semibold">
+                      {formatCurrency(selectedOrder.returnTotal || 0)}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Net Total</div>
+                    <div className="text-sm font-semibold">
+                      {formatCurrency(selectedOrder.netTotal || selectedOrder.orderTotal)}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Paid</div>
+                    <div className="text-sm font-semibold">
+                      {formatCurrency(selectedOrder.paidAmount || 0)}
+                    </div>
+                    <div className="mt-2 text-xs text-ink/60">Due</div>
+                    <div className="text-sm font-semibold">
+                      {formatCurrency(selectedOrder.dueAmount || 0)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slatewash">
+                  <div className="flex items-center justify-between border-b border-slatewash px-4 py-3 text-sm font-semibold">
+                    <span>Items</span>
+                    <span>{selectedOrder.items.length} lines</span>
+                  </div>
+                  <div className="divide-y divide-slatewash">
+                    {selectedOrder.items.map((item) => (
+                      <div
+                        key={item.itemCode}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+                      >
+                        <div>
+                          <div className="font-semibold">{item.itemName}</div>
+                          <div className="text-xs text-ink/60">Item code: {item.itemCode}</div>
+                        </div>
+                        <div className="text-right text-xs text-ink/60">
+                          <div>{item.quantity} x {formatCurrency(item.unitPrice)}</div>
+                          <div className="text-sm font-semibold">
+                            {formatCurrency(item.lineTotal)}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
             {mode === "edit" && (
               <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-ink/70">Edit Items</div>
+                  <button
+                    className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                    type="button"
+                    onClick={() => setShowAddItem((prev) => !prev)}
+                  >
+                    {showAddItem ? "Hide Add Item" : "Add Item"}
+                  </button>
+                </div>
+                {showAddItem && (
+                  <div className="space-y-3 rounded-2xl border border-slatewash p-4">
+                    <div className="relative">
+                      <input
+                        className="w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                        placeholder="Search item by code or name"
+                        value={editSearch}
+                        onChange={(event) => {
+                          setEditSearch(event.target.value);
+                          setEditForm((prev) => ({
+                            ...prev,
+                            productId: "",
+                            itemCode: "",
+                            itemName: "",
+                            unitPrice: 0
+                          }));
+                        }}
+                      />
+                      {editSuggestions.length > 0 && (
+                        <div className="absolute z-10 mt-2 w-full rounded-2xl border border-slatewash bg-white shadow">
+                          {editSuggestions.slice(0, 6).map((product) => (
+                            <button
+                              key={product._id}
+                              type="button"
+                              className="w-full px-4 py-3 text-left text-sm hover:bg-slatewash/60"
+                              onClick={() => handleSelectEditProduct(product)}
+                            >
+                              {product.itemCode} - {product.displayName}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <input
+                        className="rounded-lg border border-slatewash px-3 py-3 text-base"
+                        name="quantity"
+                        placeholder="Qty"
+                        type="number"
+                        min="1"
+                        value={editForm.quantity}
+                        onChange={handleEditFormChange}
+                      />
+                      <div className="rounded-lg bg-slatewash/60 px-3 py-3 text-sm">
+                        {formatCurrency(editForm.unitPrice)}
+                      </div>
+                    </div>
+                    <button
+                      className="w-full rounded-lg bg-ink py-3 text-sand"
+                      type="button"
+                      onClick={addEditItem}
+                    >
+                      Add Item
+                    </button>
+                  </div>
+                )}
                 {editItems.map((item, index) => (
                   <div key={item.itemCode} className="rounded-2xl bg-slatewash/60 p-3">
                     <div className="font-semibold">{item.itemName}</div>
@@ -473,6 +1018,76 @@ const SalesHistoryPage = () => {
 
             {mode === "deliver" && (
               <div className="mt-4 space-y-4">
+                <div className="rounded-2xl bg-slatewash/60 p-4 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-ink/60">Order Total</span>
+                    <span className="font-semibold">
+                      {formatCurrency(deliveryItems.reduce((sum, item) => sum + item.lineTotal, 0))}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-ink/60">Returns</span>
+                    <span className="font-semibold">
+                      {formatCurrency(returns.reduce((sum, item) => sum + item.returnTotal, 0))}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs text-ink/60">Discount (%)</label>
+                      <input
+                        className="mt-1 w-full rounded-lg border border-slatewash px-3 py-2"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={discountPercent}
+                        onChange={(event) => setDiscountPercent(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-ink/60">Discount Amount</label>
+                      <div className="mt-1 rounded-lg bg-white px-3 py-2 text-sm">
+                        {(() => {
+                          const orderTotal = deliveryItems.reduce(
+                            (sum, item) => sum + item.lineTotal,
+                            0
+                          );
+                          const returnTotal = returns.reduce(
+                            (sum, item) => sum + item.returnTotal,
+                            0
+                          );
+                          const baseTotal = Math.max(orderTotal - returnTotal, 0);
+                          const discountAmount = Math.max(
+                            (baseTotal * Number(discountPercent || 0)) / 100,
+                            0
+                          );
+                          return formatCurrency(discountAmount);
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-ink/60">Net Total</span>
+                    <span className="font-semibold">
+                      {(() => {
+                        const orderTotal = deliveryItems.reduce(
+                          (sum, item) => sum + item.lineTotal,
+                          0
+                        );
+                        const returnTotal = returns.reduce(
+                          (sum, item) => sum + item.returnTotal,
+                          0
+                        );
+                        const baseTotal = Math.max(orderTotal - returnTotal, 0);
+                        const discountAmount = Math.max(
+                          (baseTotal * Number(discountPercent || 0)) / 100,
+                          0
+                        );
+                        return formatCurrency(Math.max(baseTotal - discountAmount, 0));
+                      })()}
+                    </span>
+                  </div>
+                </div>
+
                 <div>
                   <div className="text-sm font-semibold text-ink/70">Delivered Items</div>
                   <div className="mt-2 space-y-3">
@@ -678,6 +1293,34 @@ const SalesHistoryPage = () => {
                       <option value="cheque">Cheque</option>
                       {selectedOrder.customer && <option value="credit">Credit</option>}
                     </select>
+                  </div>
+                  <div className="rounded-xl border border-slatewash bg-slatewash/50 px-3 py-2 text-xs text-ink/60">
+                    {(() => {
+                      const orderTotal = deliveryItems.reduce(
+                        (sum, item) => sum + item.lineTotal,
+                        0
+                      );
+                      const returnTotal = returns.reduce(
+                        (sum, item) => sum + item.returnTotal,
+                        0
+                      );
+                      const baseTotal = Math.max(orderTotal - returnTotal, 0);
+                      const discountAmount = Math.max(
+                        (baseTotal * Number(discountPercent || 0)) / 100,
+                        0
+                      );
+                      const netTotal = Math.max(baseTotal - discountAmount, 0);
+                      const paid = paymentMethod === "credit" ? 0 : Number(paidAmount || 0);
+                      const balance = Math.max(paid - netTotal, 0);
+                      const due = Math.max(netTotal - paid, 0);
+                      if (paymentMethod === "credit") {
+                        return `Due: ${formatCurrency(netTotal)}`;
+                      }
+                      if (due > 0) {
+                        return `Due: ${formatCurrency(due)}`;
+                      }
+                      return `Balance: ${formatCurrency(balance)}`;
+                    })()}
                   </div>
                   <button
                     className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-sand"

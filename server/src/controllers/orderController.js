@@ -4,7 +4,7 @@ const Product = require("../models/Product");
 const Payment = require("../models/Payment");
 const { createSaleFromPayload } = require("../services/salesService");
 
-const buildOrderItems = async (items) => {
+const buildOrderItems = async (items, reservedQtyByProduct = new Map()) => {
   const result = [];
   for (const item of items) {
     if (!item.productId || !item.quantity) {
@@ -21,6 +21,18 @@ const buildOrderItems = async (items) => {
     }
 
     const quantity = Number(item.quantity);
+    if (quantity <= 0) {
+      throw new Error("Quantity must be greater than 0");
+    }
+
+    const reservedQty = reservedQtyByProduct.get(product._id.toString()) || 0;
+    const availableQty = Number(product.totalStock || 0) + Number(reservedQty || 0);
+
+    if (quantity > availableQty) {
+      throw new Error(
+        `Insufficient stock for ${product.displayName}. Available: ${availableQty}`
+      );
+    }
     const unitPrice = Number(product.currentSellingPrice || 0);
     result.push({
       productId: product._id,
@@ -52,6 +64,22 @@ const createOrder = async (req, res) => {
 
     const orderItems = await buildOrderItems(items);
     const orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    const stockUpdates = orderItems.reduce((map, item) => {
+      const key = item.productId.toString();
+      map.set(key, (map.get(key) || 0) + item.quantity);
+      return map;
+    }, new Map());
+
+    if (stockUpdates.size > 0) {
+      await Product.bulkWrite(
+        [...stockUpdates.entries()].map(([productId, qty]) => ({
+          updateOne: {
+            filter: { _id: productId },
+            update: { $inc: { totalStock: -qty } }
+          }
+        }))
+      );
+    }
 
     const order = await Order.create({
       orderNo: `ORD-${Date.now()}`,
@@ -65,7 +93,8 @@ const createOrder = async (req, res) => {
       paidAmount: 0,
       dueAmount: orderTotal,
       orderStatus: "pending_delivery",
-      paymentStatus: "not_collected"
+      paymentStatus: "not_collected",
+      stockReserved: true
     });
 
     return res.status(201).json(order);
@@ -117,7 +146,43 @@ const updateOrder = async (req, res) => {
 
   if (items.length > 0) {
     try {
-      const orderItems = await buildOrderItems(items);
+      const reservedQtyByProduct = new Map(
+        order.items.map((item) => [item.productId.toString(), item.quantity])
+      );
+      const orderItems = await buildOrderItems(items, reservedQtyByProduct);
+
+      if (order.stockReserved) {
+        const newQtyByProduct = new Map(
+          orderItems.map((item) => [item.productId.toString(), item.quantity])
+        );
+        const deltaUpdates = new Map();
+
+        reservedQtyByProduct.forEach((qty, productId) => {
+          const nextQty = newQtyByProduct.get(productId) || 0;
+          const delta = nextQty - qty;
+          if (delta !== 0) {
+            deltaUpdates.set(productId, delta);
+          }
+        });
+
+        newQtyByProduct.forEach((qty, productId) => {
+          if (!reservedQtyByProduct.has(productId)) {
+            deltaUpdates.set(productId, qty);
+          }
+        });
+
+        if (deltaUpdates.size > 0) {
+          await Product.bulkWrite(
+            [...deltaUpdates.entries()].map(([productId, delta]) => ({
+              updateOne: {
+                filter: { _id: productId },
+                update: { $inc: { totalStock: -delta } }
+              }
+            }))
+          );
+        }
+      }
+
       order.items = orderItems;
       order.orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
       order.netTotal = order.orderTotal;
@@ -137,10 +202,41 @@ const cancelOrder = async (req, res) => {
     return res.status(404).json({ message: "Order not found" });
   }
 
+  if (order.orderStatus === "cancelled") {
+    return res.json(order);
+  }
+
+  if (order.stockReserved) {
+    const restoreUpdates = order.items.map((item) => ({
+      updateOne: {
+        filter: { _id: item.productId },
+        update: { $inc: { totalStock: item.quantity } }
+      }
+    }));
+    if (restoreUpdates.length > 0) {
+      await Product.bulkWrite(restoreUpdates);
+    }
+    order.stockReserved = false;
+  }
+
   order.orderStatus = "cancelled";
   order.paymentStatus = "not_collected";
   await order.save();
   return res.json(order);
+};
+
+const deleteOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+
+  if (order.orderStatus !== "cancelled") {
+    return res.status(400).json({ message: "Only cancelled orders can be deleted" });
+  }
+
+  await Order.deleteOne({ _id: order._id });
+  return res.json({ message: "Order deleted" });
 };
 
 const deliverOrder = async (req, res) => {
@@ -211,7 +307,8 @@ const deliverOrder = async (req, res) => {
       saleType:
         order.customer && numericPaid > 0 && numericPaid < netTotal ? "credit" : "walk-in",
       cashierId: req.user?._id,
-      orderId: order._id
+      orderId: order._id,
+      skipProductStockUpdate: order.stockReserved
     });
 
     const dueAmount = sale.dueAmount || 0;
@@ -252,6 +349,7 @@ const deliverOrder = async (req, res) => {
     order.netTotal = sale.netTotal;
     order.paidAmount = sale.paidAmount;
     order.dueAmount = sale.dueAmount;
+    order.stockReserved = false;
     await order.save();
 
     return res.json({ order, sale });
@@ -266,5 +364,6 @@ module.exports = {
   getOrder,
   updateOrder,
   cancelOrder,
-  deliverOrder
+  deliverOrder,
+  deleteOrder
 };

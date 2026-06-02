@@ -5,7 +5,8 @@ const {
   getOrder,
   updateOrder,
   cancelOrder,
-  deliverOrder
+  deliverOrder,
+  deleteOrder
 } = require("../controllers/orderController");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
@@ -17,5 +18,6 @@ router.get("/:id", requireAuth, getOrder);
 router.put("/:id", requireAuth, requireRole(["admin", "manager", "cashier"]), updateOrder);
 router.patch("/:id/cancel", requireAuth, cancelOrder);
 router.post("/:id/deliver", requireAuth, deliverOrder);
+router.delete("/:id", requireAuth, deleteOrder);
 
 module.exports = router;

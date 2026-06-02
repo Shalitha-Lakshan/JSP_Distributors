@@ -102,9 +102,25 @@ const PosPage = () => {
     [customers, customerId]
   );
 
+  const getProductStock = (productId) => {
+    const product = products.find((entry) => entry._id === productId);
+    return Number(product?.totalStock || 0);
+  };
+
+  const getCartQty = (productId) =>
+    cart.find((item) => item.productId === productId)?.quantity || 0;
+
   const handleAddToCart = (product) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.productId === product._id);
+      const availableStock = Number(product.totalStock || 0);
+      const currentQty = existing?.quantity || 0;
+
+      if (availableStock <= 0 || currentQty >= availableStock) {
+        setError(`No stock available for ${product.displayName}.`);
+        return prev;
+      }
+
       if (existing) {
         return prev.map((item) =>
           item.productId === product._id
@@ -131,19 +147,25 @@ const PosPage = () => {
   };
 
   const updateCartQty = (productId, nextQty) => {
+    const availableStock = getProductStock(productId);
+    const safeQty = Math.min(Math.max(nextQty, 0), availableStock);
     setCart((prev) =>
       prev
         .map((item) =>
           item.productId === productId
             ? {
                 ...item,
-                quantity: nextQty,
-                lineTotal: nextQty * item.unitPrice
+                quantity: safeQty,
+                lineTotal: safeQty * item.unitPrice
               }
             : item
         )
         .filter((item) => item.quantity > 0)
     );
+
+    if (nextQty > availableStock) {
+      setError("Quantity exceeds available stock.");
+    }
   };
 
   const removeCartItem = (productId) => {
@@ -161,6 +183,12 @@ const PosPage = () => {
 
     if (cart.length === 0) {
       setError("Add at least one item to the order.");
+      return;
+    }
+
+    const stockIssue = cart.find((item) => item.quantity > getProductStock(item.productId));
+    if (stockIssue) {
+      setError(`Insufficient stock for ${stockIssue.itemName}.`);
       return;
     }
 
@@ -183,6 +211,7 @@ const PosPage = () => {
       setCustomerId("");
       setCustomerSearch("");
       setIsWalkIn(false);
+      window.location.reload();
     } catch (err) {
       setError(err.response?.data?.message || "Failed to create order");
     } finally {
@@ -238,11 +267,16 @@ const PosPage = () => {
             {fastMoving.map((item) => (
               <button
                 key={item._id}
-                className="rounded-full bg-slatewash px-3 py-1 text-sm text-ink"
+                className={`rounded-full px-3 py-1 text-sm ${
+                  item.totalStock > 0
+                    ? "bg-slatewash text-ink"
+                    : "bg-slatewash/40 text-ink/40 cursor-not-allowed"
+                }`}
                 type="button"
                 onClick={() => handleAddToCart(item)}
+                disabled={item.totalStock <= 0}
               >
-                {item.displayName}
+                {item.displayName} ({item.totalStock || 0})
               </button>
             ))}
             {fastMoving.length === 0 && (
@@ -261,13 +295,19 @@ const PosPage = () => {
                   <div>
                     <div className="font-semibold">{item.displayName}</div>
                     <div className="text-sm text-ink/60">Item code: {item.itemCode}</div>
+                    <div className="text-xs text-ink/60">Available: {item.totalStock || 0}</div>
                   </div>
                   <button
-                    className="rounded-lg bg-ink px-3 py-1 text-sand"
+                    className={`rounded-lg px-3 py-1 ${
+                      item.totalStock > 0
+                        ? "bg-ink text-sand"
+                        : "bg-slatewash text-ink/40 cursor-not-allowed"
+                    }`}
                     type="button"
                     onClick={() => handleAddToCart(item)}
+                    disabled={item.totalStock <= 0}
                   >
-                    Add
+                    {item.totalStock > 0 ? "Add" : "Out of stock"}
                   </button>
                 </div>
               ))}
@@ -289,6 +329,9 @@ const PosPage = () => {
                 <div>
                   <div className="font-semibold">{item.itemName}</div>
                   <div className="text-sm text-ink/60">Item code: {item.itemCode}</div>
+                  <div className="text-xs text-ink/60">
+                    Available: {getProductStock(item.productId)}
+                  </div>
                 </div>
                 <button
                   className="text-xs font-semibold text-clay"
@@ -303,6 +346,7 @@ const PosPage = () => {
                   className="rounded-lg border border-slatewash px-3 py-2"
                   type="number"
                   min="1"
+                  max={getProductStock(item.productId)}
                   value={item.quantity}
                   onChange={(event) => updateCartQty(item.productId, Number(event.target.value))}
                 />
