@@ -7,7 +7,19 @@ const orderItemSchema = new mongoose.Schema(
     itemName: { type: String, required: true },
     quantity: { type: Number, required: true, min: 0 },
     unitPrice: { type: Number, required: true, min: 0 },
-    lineTotal: { type: Number, required: true, min: 0 }
+    lineTotal: { type: Number, required: true, min: 0 },
+    usedBatches: {
+      type: [
+        {
+          batchId: { type: mongoose.Schema.Types.ObjectId, ref: "StockBatch" },
+          batchNo: { type: String, required: true },
+          qty: { type: Number, required: true, min: 0 },
+          billingPrice: { type: Number, required: true, min: 0 },
+          lineTotal: { type: Number, required: true, min: 0 }
+        }
+      ],
+      default: []
+    }
   },
   { _id: false }
 );

@@ -110,58 +110,91 @@ const PosPage = () => {
   const getCartQty = (productId) =>
     cart.find((item) => item.productId === productId)?.quantity || 0;
 
-  const handleAddToCart = (product) => {
-    setCart((prev) => {
-      const existing = prev.find((item) => item.productId === product._id);
+  const computeBillingForQty = async (productId, qty) => {
+    // fetch FIFO batches for product and compute billing total for qty
+    const { data: batches = [] } = await api.get(`/api/stock/product/${productId}`, {
+      headers: authHeader
+    });
+    const availableBatches = (batches || []).filter((b) => Number(b.remainingQty || 0) > 0);
+    let remaining = qty;
+    let billingTotal = 0;
+    const usedBatches = [];
+
+    for (const batch of availableBatches) {
+      if (remaining <= 0) break;
+      const take = Math.min(Number(batch.remainingQty || 0), remaining);
+      remaining -= take;
+      const bp = Number(batch.billingPrice || 0);
+      billingTotal += take * bp;
+      usedBatches.push({ batchId: batch._id, batchNo: batch.batchNo, qty: take, billingPrice: bp, lineTotal: take * bp });
+    }
+
+    if (remaining > 0) {
+      throw new Error("Insufficient stock to compute billing price");
+    }
+
+    return { unitPrice: billingTotal / qty, lineTotal: billingTotal, usedBatches };
+  };
+
+  const handleAddToCart = async (product) => {
+    try {
+      const existing = cart.find((item) => item.productId === product._id);
       const availableStock = Number(product.totalStock || 0);
       const currentQty = existing?.quantity || 0;
 
       if (availableStock <= 0 || currentQty >= availableStock) {
         setError(`No stock available for ${product.displayName}.`);
-        return prev;
+        return;
       }
 
       if (existing) {
-        return prev.map((item) =>
-          item.productId === product._id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-                lineTotal: (item.quantity + 1) * item.unitPrice
-              }
-            : item
-        );
+        const nextQty = existing.quantity + 1;
+        const billing = await computeBillingForQty(product._id, nextQty);
+        setCart((prev) => prev.map((item) => (item.productId === product._id ? { ...item, quantity: nextQty, unitPrice: billing.unitPrice, lineTotal: billing.lineTotal, usedBatches: billing.usedBatches } : item)));
+        return;
       }
-      return [
+
+      const billing = await computeBillingForQty(product._id, 1);
+      setCart((prev) => [
         ...prev,
         {
           productId: product._id,
           itemCode: product.itemCode,
           itemName: product.displayName,
           quantity: 1,
-          unitPrice: Number(product.currentSellingPrice || 0),
-          lineTotal: Number(product.currentSellingPrice || 0)
+          unitPrice: billing.unitPrice,
+          lineTotal: billing.lineTotal,
+          usedBatches: billing.usedBatches
         }
-      ];
-    });
+      ]);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Failed to compute billing price");
+    }
   };
 
-  const updateCartQty = (productId, nextQty) => {
+  const updateCartQty = async (productId, nextQty) => {
     const availableStock = getProductStock(productId);
     const safeQty = Math.min(Math.max(nextQty, 0), availableStock);
-    setCart((prev) =>
-      prev
-        .map((item) =>
-          item.productId === productId
-            ? {
-                ...item,
-                quantity: safeQty,
-                lineTotal: safeQty * item.unitPrice
-              }
-            : item
-        )
-        .filter((item) => item.quantity > 0)
-    );
+
+    if (safeQty <= 0) {
+      setCart((prev) => prev.filter((item) => item.productId !== productId));
+      return;
+    }
+
+    try {
+      const billing = await computeBillingForQty(productId, safeQty);
+      setCart((prev) =>
+        prev
+          .map((item) =>
+            item.productId === productId
+              ? { ...item, quantity: safeQty, unitPrice: billing.unitPrice, lineTotal: billing.lineTotal, usedBatches: billing.usedBatches }
+              : item
+          )
+          .filter((item) => item.quantity > 0)
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Failed to compute billing price");
+    }
 
     if (nextQty > availableStock) {
       setError("Quantity exceeds available stock.");
@@ -197,7 +230,8 @@ const PosPage = () => {
       const payload = {
         items: cart.map((item) => ({
           productId: item.productId,
-          quantity: item.quantity
+          quantity: item.quantity,
+          usedBatches: item.usedBatches || []
         }))
       };
 
@@ -350,11 +384,29 @@ const PosPage = () => {
                   value={item.quantity}
                   onChange={(event) => updateCartQty(item.productId, Number(event.target.value))}
                 />
+
                 <div className="rounded-lg bg-slatewash/70 px-3 py-2 text-sm">
-                  {formatCurrency(item.unitPrice)}
+                  {item.usedBatches && item.usedBatches.length > 0 ? (
+                    <div>
+                      <div className="text-xs text-ink/70">
+                        {item.usedBatches.map((b, idx) => (
+                          <div key={idx} className="flex justify-between">
+                            <span>
+                              {b.qty} × Rs. {Number(b.billingPrice).toLocaleString("en-LK")}
+                            </span>
+                            <span>Rs. {Number(b.lineTotal).toLocaleString("en-LK")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-ink/60">Billing preview unavailable</div>
+                  )}
                 </div>
+
                 <div className="rounded-lg bg-slatewash/70 px-3 py-2 text-sm">
-                  {formatCurrency(item.lineTotal)}
+                  <div className="text-xs text-ink/60">Item Total</div>
+                  <div className="font-semibold">{formatCurrency(item.lineTotal)}</div>
                 </div>
               </div>
             </div>

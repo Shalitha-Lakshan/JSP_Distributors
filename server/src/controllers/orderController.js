@@ -1,11 +1,15 @@
 const Order = require("../models/Order");
 const Customer = require("../models/Customer");
 const Product = require("../models/Product");
+const StockBatch = require("../models/StockBatch");
 const Payment = require("../models/Payment");
 const { createSaleFromPayload } = require("../services/salesService");
 
-const buildOrderItems = async (items, reservedQtyByProduct = new Map()) => {
-  const result = [];
+const reserveStockForItems = async (items) => {
+  const orderItems = [];
+  const batchUpdates = [];
+  const stockUpdates = new Map();
+
   for (const item of items) {
     if (!item.productId || !item.quantity) {
       throw new Error("Product and quantity are required");
@@ -25,26 +29,100 @@ const buildOrderItems = async (items, reservedQtyByProduct = new Map()) => {
       throw new Error("Quantity must be greater than 0");
     }
 
-    const reservedQty = reservedQtyByProduct.get(product._id.toString()) || 0;
-    const availableQty = Number(product.totalStock || 0) + Number(reservedQty || 0);
+    const batches = await StockBatch.find({
+      productId: item.productId,
+      remainingQty: { $gt: 0 }
+    }).sort({ receivedDate: 1 });
 
-    if (quantity > availableQty) {
+    let remaining = quantity;
+    let lineTotal = 0;
+    const usedBatches = [];
+
+    for (const batch of batches) {
+      if (remaining <= 0) {
+        break;
+      }
+
+      const takeQty = Math.min(batch.remainingQty, remaining);
+      remaining -= takeQty;
+      const batchTotal = takeQty * Number(batch.billingPrice || 0);
+      lineTotal += batchTotal;
+
+      usedBatches.push({
+        batchId: batch._id,
+        batchNo: batch.batchNo,
+        qty: takeQty,
+        billingPrice: Number(batch.billingPrice || 0),
+        lineTotal: batchTotal
+      });
+
+      batchUpdates.push({
+        updateOne: {
+          filter: { _id: batch._id },
+          update: { $inc: { remainingQty: -takeQty } }
+        }
+      });
+    }
+
+    if (remaining > 0) {
       throw new Error(
-        `Insufficient stock for ${product.displayName}. Available: ${availableQty}`
+        `Insufficient stock for ${product.displayName}. Available: ${quantity - remaining}`
       );
     }
-    const unitPrice = Number(product.currentSellingPrice || 0);
-    result.push({
+
+    orderItems.push({
       productId: product._id,
       itemCode: product.itemCode,
       itemName: product.displayName,
       quantity,
-      unitPrice,
-      lineTotal: quantity * unitPrice
+      unitPrice: quantity > 0 ? lineTotal / quantity : 0,
+      lineTotal,
+      usedBatches
     });
+
+    stockUpdates.set(
+      product._id.toString(),
+      (stockUpdates.get(product._id.toString()) || 0) + quantity
+    );
   }
 
-  return result;
+  return { orderItems, batchUpdates, stockUpdates };
+};
+
+const restoreReservedStock = async (orderItems) => {
+  const restoreBatches = [];
+  const stockUpdates = new Map();
+
+  orderItems.forEach((item) => {
+    stockUpdates.set(
+      item.productId.toString(),
+      (stockUpdates.get(item.productId.toString()) || 0) + item.quantity
+    );
+
+    (item.usedBatches || []).forEach((batch) => {
+      restoreBatches.push({
+        updateOne: {
+          filter: { _id: batch.batchId },
+          update: { $inc: { remainingQty: batch.qty } }
+        }
+      });
+    });
+  });
+
+  if (restoreBatches.length > 0) {
+    await StockBatch.bulkWrite(restoreBatches);
+  }
+
+  if (stockUpdates.size > 0) {
+    await Product.bulkWrite(
+      [...stockUpdates.entries()].map(([productId, qty]) => ({
+        updateOne: {
+          filter: { _id: productId },
+          update: { $inc: { totalStock: qty } }
+        }
+      }))
+    );
+  }
 };
 
 const createOrder = async (req, res) => {
@@ -62,13 +140,12 @@ const createOrder = async (req, res) => {
       }
     }
 
-    const orderItems = await buildOrderItems(items);
+    const { orderItems, batchUpdates, stockUpdates } = await reserveStockForItems(items);
     const orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
-    const stockUpdates = orderItems.reduce((map, item) => {
-      const key = item.productId.toString();
-      map.set(key, (map.get(key) || 0) + item.quantity);
-      return map;
-    }, new Map());
+
+    if (batchUpdates.length > 0) {
+      await StockBatch.bulkWrite(batchUpdates);
+    }
 
     if (stockUpdates.size > 0) {
       await Product.bulkWrite(
@@ -146,47 +223,32 @@ const updateOrder = async (req, res) => {
 
   if (items.length > 0) {
     try {
-      const reservedQtyByProduct = new Map(
-        order.items.map((item) => [item.productId.toString(), item.quantity])
-      );
-      const orderItems = await buildOrderItems(items, reservedQtyByProduct);
-
       if (order.stockReserved) {
-        const newQtyByProduct = new Map(
-          orderItems.map((item) => [item.productId.toString(), item.quantity])
+        await restoreReservedStock(order.items);
+      }
+
+      const { orderItems, batchUpdates, stockUpdates } = await reserveStockForItems(items);
+
+      if (batchUpdates.length > 0) {
+        await StockBatch.bulkWrite(batchUpdates);
+      }
+
+      if (stockUpdates.size > 0) {
+        await Product.bulkWrite(
+          [...stockUpdates.entries()].map(([productId, qty]) => ({
+            updateOne: {
+              filter: { _id: productId },
+              update: { $inc: { totalStock: -qty } }
+            }
+          }))
         );
-        const deltaUpdates = new Map();
-
-        reservedQtyByProduct.forEach((qty, productId) => {
-          const nextQty = newQtyByProduct.get(productId) || 0;
-          const delta = nextQty - qty;
-          if (delta !== 0) {
-            deltaUpdates.set(productId, delta);
-          }
-        });
-
-        newQtyByProduct.forEach((qty, productId) => {
-          if (!reservedQtyByProduct.has(productId)) {
-            deltaUpdates.set(productId, qty);
-          }
-        });
-
-        if (deltaUpdates.size > 0) {
-          await Product.bulkWrite(
-            [...deltaUpdates.entries()].map(([productId, delta]) => ({
-              updateOne: {
-                filter: { _id: productId },
-                update: { $inc: { totalStock: -delta } }
-              }
-            }))
-          );
-        }
       }
 
       order.items = orderItems;
       order.orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
       order.netTotal = order.orderTotal;
       order.dueAmount = order.orderTotal;
+      order.stockReserved = true;
     } catch (err) {
       return res.status(400).json({ message: err.message || "Failed to update order" });
     }
@@ -207,15 +269,7 @@ const cancelOrder = async (req, res) => {
   }
 
   if (order.stockReserved) {
-    const restoreUpdates = order.items.map((item) => ({
-      updateOne: {
-        filter: { _id: item.productId },
-        update: { $inc: { totalStock: item.quantity } }
-      }
-    }));
-    if (restoreUpdates.length > 0) {
-      await Product.bulkWrite(restoreUpdates);
-    }
+    await restoreReservedStock(order.items);
     order.stockReserved = false;
   }
 
@@ -251,14 +305,36 @@ const deliverOrder = async (req, res) => {
     return res.status(400).json({ message: "Order is not pending delivery" });
   }
 
-  const deliveredItems = items.length
-    ? items
-    : order.items.map((item) => ({
+  if (order.stockReserved && items.length > 0) {
+    const mismatch = items.some((item) => {
+      const reserved = order.items.find(
+        (orderItem) => orderItem.productId.toString() === String(item.productId)
+      );
+      return !reserved || Number(item.quantity) !== Number(reserved.quantity);
+    });
+    if (mismatch) {
+      return res
+        .status(400)
+        .json({ message: "Delivery quantities must match reserved stock" });
+    }
+  }
+
+  const deliveredItems = order.stockReserved
+    ? order.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
         itemCode: item.itemCode,
-        itemName: item.itemName
-      }));
+        itemName: item.itemName,
+        usedBatches: item.usedBatches || []
+      }))
+    : items.length
+      ? items
+      : order.items.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          itemCode: item.itemCode,
+          itemName: item.itemName
+        }));
 
   const orderItemMap = new Map(
     order.items.map((item) => [item.productId.toString(), item])
@@ -308,7 +384,8 @@ const deliverOrder = async (req, res) => {
         order.customer && numericPaid > 0 && numericPaid < netTotal ? "credit" : "walk-in",
       cashierId: req.user?._id,
       orderId: order._id,
-      skipProductStockUpdate: order.stockReserved
+      skipProductStockUpdate: order.stockReserved,
+      skipBatchUpdate: order.stockReserved
     });
 
     const dueAmount = sale.dueAmount || 0;
@@ -364,6 +441,6 @@ module.exports = {
   getOrder,
   updateOrder,
   cancelOrder,
-  deliverOrder,
-  deleteOrder
+  deleteOrder,
+  deliverOrder
 };

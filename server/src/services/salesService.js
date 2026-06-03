@@ -13,7 +13,8 @@ const createSaleFromPayload = async ({
   saleType = "walk-in",
   cashierId,
   orderId,
-  skipProductStockUpdate = false
+  skipProductStockUpdate = false,
+  skipBatchUpdate = false
 }) => {
   if (!items.length) {
     throw new Error("No items provided");
@@ -38,6 +39,43 @@ const createSaleFromPayload = async ({
     }
 
     const qtyNeeded = Number(item.quantity);
+    if (qtyNeeded <= 0) {
+      throw new Error("Quantity must be greater than 0");
+    }
+
+    const providedBatches = Array.isArray(item.usedBatches) && item.usedBatches.length > 0;
+
+    if (providedBatches) {
+      const usedBatches = item.usedBatches.map((batch) => ({
+        batchId: batch.batchId,
+        batchNo: batch.batchNo,
+        qty: Number(batch.qty || 0),
+        billingPrice: Number(batch.billingPrice || 0),
+        sellingPrice: Number(batch.sellingPrice || batch.billingPrice || 0),
+        lineTotal: Number(batch.lineTotal || 0),
+        sellingLineTotal: Number(batch.sellingLineTotal || batch.lineTotal || 0)
+      }));
+
+      const allocatedQty = usedBatches.reduce((sum, batch) => sum + batch.qty, 0);
+      if (allocatedQty < qtyNeeded) {
+        throw new Error("Reserved stock does not cover requested quantity");
+      }
+
+      const billingTotal = usedBatches.reduce((sum, batch) => sum + batch.qty * batch.billingPrice, 0);
+
+      normalizedItems.push({
+        product: product._id,
+        itemCode: item.itemCode || product.itemCode,
+        itemName: item.itemName || product.displayName,
+        quantity: qtyNeeded,
+        sellingPrice: billingTotal / qtyNeeded,
+        billingPrice: billingTotal / qtyNeeded,
+        lineTotal: billingTotal,
+        usedBatches
+      });
+      continue;
+    }
+
     const batches = await StockBatch.find({
       productId: item.productId,
       remainingQty: { $gt: 0 }
@@ -46,7 +84,6 @@ const createSaleFromPayload = async ({
     let remaining = qtyNeeded;
     const usedBatches = [];
     let billingTotal = 0;
-    let sellingTotal = 0;
 
     for (const batch of batches) {
       if (remaining <= 0) {
@@ -55,20 +92,18 @@ const createSaleFromPayload = async ({
 
       const takeQty = Math.min(batch.remainingQty, remaining);
       remaining -= takeQty;
-      const batchSelling =
-        batch.sellingPrice !== undefined && batch.sellingPrice !== null
-          ? batch.sellingPrice
-          : product.currentSellingPrice || 0;
-      billingTotal += takeQty * batch.billingPrice;
-      sellingTotal += takeQty * batchSelling;
+      const batchBilling = Number(batch.billingPrice || 0);
+      const batchSelling = Number(batch.sellingPrice || product.currentSellingPrice || 0);
+
+      billingTotal += takeQty * batchBilling;
 
       usedBatches.push({
         batchId: batch._id,
         batchNo: batch.batchNo,
         qty: takeQty,
-        billingPrice: batch.billingPrice,
+        billingPrice: batchBilling,
         sellingPrice: batchSelling,
-        lineTotal: takeQty * batch.billingPrice,
+        lineTotal: takeQty * batchBilling,
         sellingLineTotal: takeQty * batchSelling
       });
 
@@ -84,18 +119,14 @@ const createSaleFromPayload = async ({
       throw new Error("Insufficient stock for item");
     }
 
-    const sellingPrice = sellingTotal / qtyNeeded;
-    const lineTotal = sellingTotal;
-    const billingPrice = billingTotal / qtyNeeded;
-
     normalizedItems.push({
       product: product._id,
       itemCode: item.itemCode || product.itemCode,
       itemName: item.itemName || product.displayName,
       quantity: qtyNeeded,
-      sellingPrice,
-      billingPrice,
-      lineTotal,
+      sellingPrice: billingTotal / qtyNeeded,
+      billingPrice: billingTotal / qtyNeeded,
+      lineTotal: billingTotal,
       usedBatches
     });
 
@@ -105,7 +136,7 @@ const createSaleFromPayload = async ({
     );
   }
 
-  if (batchUpdates.length > 0) {
+  if (batchUpdates.length > 0 && !skipBatchUpdate) {
     await StockBatch.bulkWrite(batchUpdates);
   }
 
