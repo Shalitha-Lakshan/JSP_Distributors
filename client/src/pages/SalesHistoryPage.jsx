@@ -8,6 +8,8 @@ const formatDateTime = (value) =>
     ? new Date(value).toLocaleString("en-LK", { hour: "2-digit", minute: "2-digit" })
     : "-";
 
+const formatQty = (value) => Number(value || 0).toLocaleString("en-LK");
+
 const IconEye = () => (
   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
     <path
@@ -78,6 +80,7 @@ const SalesHistoryPage = () => {
     unitPrice: 0,
     quantity: ""
   });
+  const [editPreview, setEditPreview] = useState(null);
   const [deliveryItems, setDeliveryItems] = useState([]);
   const [hasReturns, setHasReturns] = useState(false);
   const [returns, setReturns] = useState([]);
@@ -95,6 +98,77 @@ const SalesHistoryPage = () => {
   const [paidAmount, setPaidAmount] = useState(0);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [saving, setSaving] = useState(false);
+
+  const computeFifoAllocation = async (productId, quantity) => {
+    const qtyNeeded = Number(quantity || 0);
+    if (!productId || qtyNeeded <= 0) {
+      throw new Error("Product and quantity are required");
+    }
+
+    const { data: batches = [] } = await api.get(`/api/stock/product/${productId}`, {
+      headers: authHeader
+    });
+
+    const availableBatches = (batches || []).filter((batch) => Number(batch.remainingQty || 0) > 0);
+    let remaining = qtyNeeded;
+    let lineTotal = 0;
+    const usedBatches = [];
+
+    for (const batch of availableBatches) {
+      if (remaining <= 0) {
+        break;
+      }
+
+      const takeQty = Math.min(Number(batch.remainingQty || 0), remaining);
+      remaining -= takeQty;
+
+      const billingPrice = Number(batch.billingPrice || 0);
+      const batchLineTotal = takeQty * billingPrice;
+      lineTotal += batchLineTotal;
+
+      usedBatches.push({
+        batchId: batch._id,
+        batchNo: batch.batchNo,
+        qty: takeQty,
+        billingPrice,
+        lineTotal: batchLineTotal
+      });
+    }
+
+    if (remaining > 0) {
+      throw new Error("Insufficient stock for selected item");
+    }
+
+    return {
+      quantity: qtyNeeded,
+      lineTotal,
+      unitPrice: qtyNeeded > 0 ? lineTotal / qtyNeeded : 0,
+      usedBatches
+    };
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const productId = editForm.productId;
+    const qty = Number(editForm.quantity || 0);
+    if (!productId || qty <= 0) {
+      setEditPreview(null);
+      return () => (mounted = false);
+    }
+
+    setEditPreview({ loading: true });
+    computeFifoAllocation(productId, qty)
+      .then((res) => {
+        if (mounted) setEditPreview(res);
+      })
+      .catch(() => {
+        if (mounted) setEditPreview(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [editForm.productId, editForm.quantity]);
 
   const authHeader = useMemo(() => {
     const token = localStorage.getItem("token");
@@ -191,7 +265,8 @@ const SalesHistoryPage = () => {
       itemName: item.itemName,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
-      lineTotal: item.lineTotal
+      lineTotal: item.lineTotal,
+      usedBatches: item.usedBatches || []
     })));
   };
 
@@ -213,18 +288,32 @@ const SalesHistoryPage = () => {
     setDiscountPercent(0);
   };
 
-  const updateEditQty = (index, nextQty) => {
-    setEditItems((prev) =>
-      prev.map((item, idx) =>
-        idx === index
-          ? {
-              ...item,
-              quantity: nextQty,
-              lineTotal: nextQty * item.unitPrice
-            }
-          : item
-      )
-    );
+  const updateEditQty = async (index, nextQty) => {
+    const nextValue = Number(nextQty || 0);
+    if (nextValue <= 0) {
+      setEditItems((prev) => prev.filter((_, idx) => idx !== index));
+      return;
+    }
+
+    try {
+      const current = editItems[index];
+      const allocation = await computeFifoAllocation(current.productId, nextValue);
+      setEditItems((prev) =>
+        prev.map((item, idx) =>
+          idx === index
+            ? {
+                ...item,
+                quantity: allocation.quantity,
+                unitPrice: allocation.unitPrice,
+                lineTotal: allocation.lineTotal,
+                usedBatches: allocation.usedBatches
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Failed to update item quantity");
+    }
   };
 
   const updateDeliveryQty = (index, nextQty) => {
@@ -299,7 +388,7 @@ const SalesHistoryPage = () => {
       productId: product._id,
       itemCode: product.itemCode,
       itemName: product.displayName,
-      unitPrice: Number(product.currentSellingPrice || 0),
+      unitPrice: 0,
       quantity: "1"
     });
     setEditSearch(`${product.itemCode} - ${product.displayName}`);
@@ -323,42 +412,54 @@ const SalesHistoryPage = () => {
       return;
     }
 
-    setEditItems((prev) => {
-      const existing = prev.find((item) => item.productId === editForm.productId);
-      if (existing) {
-        return prev.map((item) =>
-          item.productId === editForm.productId
-            ? {
-                ...item,
-                quantity: item.quantity + qty,
-                lineTotal: (item.quantity + qty) * item.unitPrice
-              }
-            : item
-        );
+    (async () => {
+      try {
+        const allocation = await computeFifoAllocation(editForm.productId, qty);
+        setEditItems((prev) => {
+          const existing = prev.find((item) => item.productId === editForm.productId);
+          if (existing) {
+            return prev.map((item) =>
+              item.productId === editForm.productId
+                ? {
+                    ...item,
+                    quantity: item.quantity + allocation.quantity,
+                    lineTotal: item.lineTotal + allocation.lineTotal,
+                    unitPrice:
+                      (item.lineTotal + allocation.lineTotal) /
+                      (item.quantity + allocation.quantity),
+                    usedBatches: [...(item.usedBatches || []), ...allocation.usedBatches]
+                  }
+                : item
+            );
+          }
+
+          return [
+            ...prev,
+            {
+              productId: editForm.productId,
+              itemCode: editForm.itemCode,
+              itemName: editForm.itemName,
+              quantity: allocation.quantity,
+              unitPrice: allocation.unitPrice,
+              lineTotal: allocation.lineTotal,
+              usedBatches: allocation.usedBatches
+            }
+          ];
+        });
+
+        setEditForm({
+          productId: "",
+          itemCode: "",
+          itemName: "",
+          unitPrice: 0,
+          quantity: ""
+        });
+        setEditSearch("");
+        setShowAddItem(false);
+      } catch (err) {
+        setError(err.response?.data?.message || err.message || "Failed to add item");
       }
-
-      return [
-        ...prev,
-        {
-          productId: editForm.productId,
-          itemCode: editForm.itemCode,
-          itemName: editForm.itemName,
-          quantity: qty,
-          unitPrice: editForm.unitPrice,
-          lineTotal: qty * editForm.unitPrice
-        }
-      ];
-    });
-
-    setEditForm({
-      productId: "",
-      itemCode: "",
-      itemName: "",
-      unitPrice: 0,
-      quantity: ""
-    });
-    setEditSearch("");
-    setShowAddItem(false);
+    })();
   };
 
   const handleReturnChange = (event) => {
@@ -627,7 +728,8 @@ const SalesHistoryPage = () => {
         {
           items: editItems.map((item) => ({
             productId: item.productId,
-            quantity: item.quantity
+            quantity: item.quantity,
+            usedBatches: item.usedBatches || []
           }))
         },
         { headers: authHeader }
@@ -673,7 +775,8 @@ const SalesHistoryPage = () => {
         {
           items: deliveryItems.map((item) => ({
             productId: item.productId,
-            quantity: item.quantity
+            quantity: item.quantity,
+            usedBatches: item.usedBatches || []
           })),
           returns: hasReturns ? returns : [],
           discount: discountAmount,
@@ -965,7 +1068,7 @@ const SalesHistoryPage = () => {
                         </div>
                       )}
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-2 sm:grid-cols-2">
                       <input
                         className="rounded-lg border border-slatewash px-3 py-3 text-base"
                         name="quantity"
@@ -976,7 +1079,15 @@ const SalesHistoryPage = () => {
                         onChange={handleEditFormChange}
                       />
                       <div className="rounded-lg bg-slatewash/60 px-3 py-3 text-sm">
-                        {formatCurrency(editForm.unitPrice)}
+                        {editPreview ? (
+                          editPreview.loading ? (
+                            <span className="text-ink/60">Calculating...</span>
+                          ) : (
+                            <div className="text-sm font-semibold">{formatCurrency(editPreview.lineTotal)}</div>
+                          )
+                        ) : (
+                          <span className="text-ink/60">Enter quantity to preview total</span>
+                        )}
                       </div>
                     </div>
                     <button
@@ -991,6 +1102,21 @@ const SalesHistoryPage = () => {
                 {editItems.map((item, index) => (
                   <div key={item.itemCode} className="rounded-2xl bg-slatewash/60 p-3">
                     <div className="font-semibold">{item.itemName}</div>
+                    {item.usedBatches && item.usedBatches.length > 0 && (
+                      <div className="mt-2 space-y-1 rounded-lg bg-white/80 px-3 py-2 text-xs text-ink/70">
+                        {item.usedBatches.map((batch, batchIndex) => (
+                          <div
+                            key={`${item.itemCode}-${batch.batchNo || batchIndex}`}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span>
+                              {Number(batch.qty || 0).toLocaleString("en-LK")} × {formatCurrency(batch.billingPrice)}
+                            </span>
+                            <span>{formatCurrency(batch.lineTotal)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <input
                         className="rounded-lg border border-slatewash px-3 py-2"
