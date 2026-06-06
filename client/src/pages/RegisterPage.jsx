@@ -8,7 +8,7 @@ const initialForm = {
   phone: "",
   password: "",
   confirmPassword: "",
-  role: "manager"
+  role: "cashier"
 };
 
 const RegisterPage = () => {

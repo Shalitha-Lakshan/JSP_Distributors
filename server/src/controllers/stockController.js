@@ -44,15 +44,40 @@ const addStock = async (req, res) => {
   return res.status(201).json(batch);
 };
 
-const listBatches = async (_req, res) => {
-  const batches = await StockBatch.find().sort({ receivedDate: -1 });
+const listBatches = async (req, res) => {
+  const { productId, remainingOnly, nearExpiryDays } = req.query;
+  const filter = {};
+
+  if (productId) {
+    filter.productId = productId;
+  }
+
+  if (remainingOnly === "true") {
+    filter.remainingQty = { $gt: 0 };
+  }
+
+  if (nearExpiryDays) {
+    const days = Number(nearExpiryDays);
+    if (!Number.isNaN(days)) {
+      const start = new Date();
+      const end = new Date();
+      end.setDate(end.getDate() + days);
+      filter.expiryDate = { $gte: start, $lte: end };
+    }
+  }
+
+  const batches = await StockBatch.find(filter)
+    .populate("productId", "displayName itemCode variant category")
+    .populate("createdBy", "name")
+    .sort({ receivedDate: -1 });
   return res.json(batches);
 };
 
 const listBatchesForProduct = async (req, res) => {
-  const batches = await StockBatch.find({ productId: req.params.productId }).sort({
-    receivedDate: 1
-  });
+  const batches = await StockBatch.find({ productId: req.params.productId })
+    .populate("productId", "displayName itemCode variant category")
+    .populate("createdBy", "name")
+    .sort({ receivedDate: 1 });
   return res.json(batches);
 };
 

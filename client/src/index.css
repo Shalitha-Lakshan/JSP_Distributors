@@ -38,6 +38,24 @@ body {
   animation: float 10s ease-in-out infinite;
 }
 
+.barcode-scanner video {
+  width: 100%;
+  border-radius: 16px;
+  display: block;
+}
+
+.barcode-scanner canvas {
+  display: none;
+}
+
+[data-scanner-root] video ~ video {
+  display: none;
+}
+
+.barcode-scanner canvas {
+  display: none;
+}
+
 @keyframes float {
   0% {
     transform: translateY(0px) translateX(0px);

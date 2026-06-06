@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.0",
     "axios": "^1.7.7",
     "jsp-distributors-pos": "file:..",
     "react": "^18.3.1",

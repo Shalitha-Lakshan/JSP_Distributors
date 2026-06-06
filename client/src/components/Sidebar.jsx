@@ -44,9 +44,10 @@ const getNavItems = (role) => {
   }
 
   return [
-    { label: "POS Billing", to: "/pos" },
-    { label: "Payments", to: "/payments" },
-    { label: "Sales History", to: "/sales" }
+    { label: "Create Order", to: "/pos" },
+    { label: "Sales", to: "/sales" },
+    { label: "Receive Payment", to: "/payments" },
+    { label: "My Daily Closing", to: "/reports/daily-closing" }
   ];
 };
 

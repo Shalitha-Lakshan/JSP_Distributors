@@ -15,7 +15,7 @@ router.get("/", requireAuth, listCustomers);
 router.post("/", requireAuth, createCustomer);
 router.get("/:id", requireAuth, getCustomer);
 router.put("/:id", requireAuth, updateCustomer);
-router.delete("/:id", requireAuth, requireRole(["admin"]), deleteCustomer);
+router.delete("/:id", requireAuth, requireRole(["admin", "manager"]), deleteCustomer);
 router.get("/:id/ledger", requireAuth, getLedger);
 
 module.exports = router;
