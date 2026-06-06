@@ -17,10 +17,16 @@ const errorHandler = require("./middleware/errorHandler");
 const app = express();
 
 const allowedOrigins = [
-  process.env.CLIENT_ORIGIN || "https://jsp-distributors.vercel.app",
   "http://localhost:5173",
   "http://localhost:3000",
 ];
+
+if (process.env.CLIENT_ORIGIN) {
+  allowedOrigins.push(...process.env.CLIENT_ORIGIN.split(",").map(o => o.trim()));
+} else {
+  allowedOrigins.push("https://jsp-distributors.vercel.app");
+}
+
 
 app.use(
   cors({
