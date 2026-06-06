@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: my-server
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node src/index.js"
+    autoDeploy: true
+    routes:
+      - src: /api/(.*)
+        dest: /api/$1
+      - src: /(.*)
+        dest: /index.html
