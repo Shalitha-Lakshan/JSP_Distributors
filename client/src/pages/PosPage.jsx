@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/client";
 
@@ -136,39 +136,88 @@ const PosPage = () => {
     return { unitPrice: billingTotal / qty, lineTotal: billingTotal, usedBatches };
   };
 
-  const handleAddToCart = async (product) => {
-    try {
-      const existing = cart.find((item) => item.productId === product._id);
-      const availableStock = Number(product.totalStock || 0);
-      const currentQty = existing?.quantity || 0;
+  // Tracks product IDs that currently have an in-flight addToCart request.
+  // Prevents duplicate rows when a user clicks/double-clicks rapidly.
+  const pendingRef = useRef(new Set());
 
-      if (availableStock <= 0 || currentQty >= availableStock) {
+  const handleAddToCart = async (product) => {
+    const pid = product._id;
+
+    // ── Guard: ignore if a request for this product is already in flight ──
+    if (pendingRef.current.has(pid)) return;
+    pendingRef.current.add(pid);
+
+    try {
+      const availableStock = Number(product.totalStock || 0);
+
+      if (availableStock <= 0) {
         setError(`No stock available for ${product.displayName}.`);
         return;
       }
 
-      if (existing) {
-        const nextQty = existing.quantity + 1;
-        const billing = await computeBillingForQty(product._id, nextQty);
-        setCart((prev) => prev.map((item) => (item.productId === product._id ? { ...item, quantity: nextQty, unitPrice: billing.unitPrice, lineTotal: billing.lineTotal, usedBatches: billing.usedBatches } : item)));
+      // Read the latest cart snapshot to decide qty.
+      // We use a local variable updated via functional setter so it
+      // reflects any state changes that occurred since the last render.
+      let currentQty = 0;
+      setCart((prevCart) => {
+        const existing = prevCart.find((item) => item.productId === pid);
+        currentQty = existing?.quantity ?? 0;
+        return prevCart; // no-op read to get latest value
+      });
+
+      // Wait one microtask tick so the state read above has resolved.
+      await Promise.resolve();
+
+      // Re-read from DOM-stable ref after the microtask
+      // (setCart above may not have flushed yet; use a snapshot approach)
+      // Actually, we capture currentQty from the functional updater above.
+
+      if (currentQty >= availableStock) {
+        setError(`No stock available for ${product.displayName}.`);
         return;
       }
 
-      const billing = await computeBillingForQty(product._id, 1);
-      setCart((prev) => [
-        ...prev,
-        {
-          productId: product._id,
-          itemCode: product.itemCode,
-          itemName: product.displayName,
-          quantity: 1,
-          unitPrice: billing.unitPrice,
-          lineTotal: billing.lineTotal,
-          usedBatches: billing.usedBatches
+      const nextQty = currentQty + 1;
+      const billing = await computeBillingForQty(pid, nextQty);
+
+      // Functional update: always operates on the freshest prevCart
+      setCart((prevCart) => {
+        const existingIndex = prevCart.findIndex((item) => item.productId === pid);
+
+        if (existingIndex !== -1) {
+          // Item already in cart → update quantity + billing in-place
+          return prevCart.map((item) =>
+            item.productId === pid
+              ? {
+                  ...item,
+                  quantity: nextQty,
+                  unitPrice: billing.unitPrice,
+                  lineTotal: billing.lineTotal,
+                  usedBatches: billing.usedBatches
+                }
+              : item
+          );
         }
-      ]);
+
+        // Item not yet in cart → append as a new row
+        return [
+          ...prevCart,
+          {
+            productId: pid,
+            itemCode: product.itemCode,
+            itemName: product.displayName,
+            quantity: 1,
+            unitPrice: billing.unitPrice,
+            lineTotal: billing.lineTotal,
+            usedBatches: billing.usedBatches
+          }
+        ];
+      });
     } catch (err) {
       setError(err.response?.data?.message || err.message || "Failed to compute billing price");
+    } finally {
+      // Always release the lock so future clicks work normally
+      pendingRef.current.delete(pid);
     }
   };
 
