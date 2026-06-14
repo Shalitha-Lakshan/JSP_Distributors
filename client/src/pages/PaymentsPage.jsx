@@ -25,6 +25,26 @@ const PaymentsPage = () => {
   const [chequeDate, setChequeDate] = useState("");
   const [chequeStatus, setChequeStatus] = useState("pending");
 
+  // Credit invoices lookup & checkboxes
+  const [unpaidInvoices, setUnpaidInvoices] = useState([]);
+  const [selectedInvoices, setSelectedInvoices] = useState({});
+  const [sidebarSearch, setSidebarSearch] = useState("");
+
+  const creditCustomers = useMemo(() => {
+    return customers
+      .filter((customer) => (customer.outstandingBalance || 0) > 0)
+      .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
+  }, [customers]);
+
+  const filteredCreditCustomers = useMemo(() => {
+    const query = sidebarSearch.trim().toLowerCase();
+    if (!query) return creditCustomers;
+    return creditCustomers.filter((customer) => {
+      const haystack = `${customer.name} ${customer.phone || ""}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [creditCustomers, sidebarSearch]);
+
   const authHeader = useMemo(() => {
     const token = localStorage.getItem("token");
     return { Authorization: `Bearer ${token}` };
@@ -98,10 +118,20 @@ const PaymentsPage = () => {
     };
   }, [payments]);
 
-  const handleSelectCustomer = (customer) => {
+  const handleSelectCustomer = async (customer) => {
     setSelectedCustomerId(customer._id);
     setCustomerSearch(`${customer.name}${customer.phone ? ` - ${customer.phone}` : ""}`);
     setCustomerSuggestions([]);
+    
+    // Fetch unpaid invoices
+    try {
+      const res = await api.get(`/api/customers/${customer._id}/unpaid-invoices`, { headers: authHeader });
+      setUnpaidInvoices(res.data || []);
+      setSelectedInvoices({});
+      setAmount("");
+    } catch (err) {
+      setError("Failed to fetch customer unpaid invoices.");
+    }
   };
 
   const resetForm = () => {
@@ -114,6 +144,23 @@ const PaymentsPage = () => {
     setBankName("");
     setChequeDate("");
     setChequeStatus("pending");
+    setUnpaidInvoices([]);
+    setSelectedInvoices({});
+    setSidebarSearch("");
+  };
+
+  const handleToggleInvoice = (invoice) => {
+    setSelectedInvoices((prev) => {
+      const next = { ...prev, [invoice._id]: !prev[invoice._id] };
+      let totalSum = 0;
+      unpaidInvoices.forEach((inv) => {
+        if (next[inv._id]) {
+          totalSum += inv.dueAmount || 0;
+        }
+      });
+      setAmount(totalSum > 0 ? String(totalSum) : "");
+      return next;
+    });
   };
 
   const handleReceivePayment = async () => {
@@ -132,6 +179,17 @@ const PaymentsPage = () => {
 
     setSaving(true);
     try {
+      const allocations = [];
+      unpaidInvoices.forEach((inv) => {
+        if (selectedInvoices[inv._id]) {
+          allocations.push({
+            invoice: inv._id,
+            invoiceNo: inv.invoiceNo,
+            allocatedAmount: inv.dueAmount
+          });
+        }
+      });
+
       const payload = {
         customer: selectedCustomerId,
         amount: Number(amount),
@@ -140,7 +198,8 @@ const PaymentsPage = () => {
         chequeNo: paymentMethod === "cheque" ? chequeNo : undefined,
         bankName: paymentMethod === "cheque" ? bankName : undefined,
         chequeDate: paymentMethod === "cheque" && chequeDate ? chequeDate : undefined,
-        chequeStatus: paymentMethod === "cheque" ? chequeStatus : undefined
+        chequeStatus: paymentMethod === "cheque" ? chequeStatus : undefined,
+        allocations
       };
 
       await api.post("/api/payments/receive", payload, { headers: authHeader });
@@ -188,27 +247,31 @@ const PaymentsPage = () => {
           Loading payments...
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="rounded-2xl bg-white/80 p-6 shadow space-y-4">
-            <div className="text-sm font-semibold text-ink/70">Payment Details</div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* Main Payment Form Container (Takes 2/3 width) */}
+          <div className="lg:col-span-2 rounded-2xl bg-white/80 p-6 shadow space-y-6">
+            <div className="text-sm font-semibold text-ink/70 border-b border-slatewash pb-3">Payment Details</div>
+            
             <div className="relative">
-              <label className="text-xs text-ink/60">Customer</label>
+              <label className="text-xs text-ink/60 uppercase font-semibold">Customer</label>
               <input
-                className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                 placeholder="Search customer by name or phone"
                 value={customerSearch}
                 onChange={(event) => {
                   setCustomerSearch(event.target.value);
                   setSelectedCustomerId("");
+                  setUnpaidInvoices([]);
+                  setSelectedInvoices({});
                 }}
               />
               {customerSearch && !selectedCustomerId && customerSuggestions.length > 0 && (
-                <div className="absolute z-10 mt-2 w-full rounded-2xl border border-slatewash bg-white shadow">
+                <div className="absolute z-10 mt-2 w-full rounded-2xl border border-slatewash bg-white shadow-lg max-h-60 overflow-y-auto">
                   {customerSuggestions.map((customer) => (
                     <button
                       key={customer._id}
                       type="button"
-                      className="w-full px-4 py-3 text-left text-sm hover:bg-slatewash/60"
+                      className="w-full px-4 py-3 text-left text-sm hover:bg-slatewash/60 border-b border-slatewash/40 last:border-b-0"
                       onClick={() => handleSelectCustomer(customer)}
                     >
                       <div className="font-semibold">{customer.name}</div>
@@ -222,27 +285,71 @@ const PaymentsPage = () => {
             </div>
 
             {selectedCustomer && (
-              <div className="rounded-xl bg-slatewash/70 px-4 py-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-ink/60">Selected</span>
-                  <span className="font-semibold">{selectedCustomer.name}</span>
+              <div className="rounded-xl bg-slatewash/70 px-4 py-3 text-sm grid gap-2 sm:grid-cols-3">
+                <div>
+                  <span className="text-xs text-ink/50 uppercase block">Selected Customer</span>
+                  <span className="font-semibold text-ink text-base">{selectedCustomer.name}</span>
                 </div>
-                <div className="mt-1 flex items-center justify-between text-xs text-ink/60">
-                  <span>Outstanding</span>
-                  <span>{formatCurrency(selectedCustomer.outstandingBalance || 0)}</span>
+                <div>
+                  <span className="text-xs text-ink/50 uppercase block">Outstanding Balance</span>
+                  <span className="font-semibold text-clay text-base">{formatCurrency(selectedCustomer.outstandingBalance || 0)}</span>
                 </div>
-                <div className="mt-1 flex items-center justify-between text-xs text-ink/60">
-                  <span>Credit Limit</span>
-                  <span>{formatCurrency(selectedCustomer.creditLimit || 0)}</span>
+                <div>
+                  <span className="text-xs text-ink/50 uppercase block">Credit Limit</span>
+                  <span className="font-semibold text-ink text-base">{formatCurrency(selectedCustomer.creditLimit || 0)}</span>
                 </div>
               </div>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            {/* Credit Invoices Sub-Table */}
+            {selectedCustomerId && unpaidInvoices.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <h3 className="text-sm font-semibold text-ink uppercase tracking-wider">Outstanding Credit Invoices ({unpaidInvoices.length})</h3>
+                <div className="overflow-x-auto rounded-xl border border-slatewash shadow-inner">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="bg-slatewash/50 text-xs font-semibold uppercase text-ink/60">
+                        <th className="px-4 py-3 w-12 text-center">Pay</th>
+                        <th className="px-4 py-3">Invoice Date</th>
+                        <th className="px-4 py-3">Invoice No</th>
+                        <th className="px-4 py-3">Order No</th>
+                        <th className="px-4 py-3">Total Value</th>
+                        <th className="px-4 py-3 text-right">Amount Due</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slatewash bg-white">
+                      {unpaidInvoices.map((inv) => (
+                        <tr key={inv._id} className="hover:bg-slatewash/20 transition">
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              className="rounded text-ink border-slatewash focus:ring-ink h-4 w-4"
+                              checked={!!selectedInvoices[inv._id]}
+                              onChange={() => handleToggleInvoice(inv)}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-ink/80">
+                            {new Date(inv.createdAt).toLocaleDateString("en-LK")}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-ink">{inv.invoiceNo}</td>
+                          <td className="px-4 py-3 text-ink/70">{inv.orderId?.orderNo || "-"}</td>
+                          <td className="px-4 py-3 font-medium">{formatCurrency(inv.netTotal)}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-clay">
+                            {formatCurrency(inv.dueAmount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="text-xs text-ink/60">Payment Method</label>
+                <label className="text-xs text-ink/60 uppercase font-semibold">Payment Method</label>
                 <select
-                  className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                  className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                   value={paymentMethod}
                   onChange={(event) => setPaymentMethod(event.target.value)}
                 >
@@ -251,9 +358,9 @@ const PaymentsPage = () => {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-ink/60">Amount</label>
+                <label className="text-xs text-ink/60 uppercase font-semibold">Amount (Rs.)</label>
                 <input
-                  className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                  className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none font-semibold text-ink"
                   type="number"
                   min="0"
                   value={amount}
@@ -263,36 +370,36 @@ const PaymentsPage = () => {
             </div>
 
             {paymentMethod === "cheque" && (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 border-t border-slatewash/50 pt-4">
                 <div>
-                  <label className="text-xs text-ink/60">Cheque No</label>
+                  <label className="text-xs text-ink/60 uppercase font-semibold">Cheque No</label>
                   <input
-                    className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                    className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                     value={chequeNo}
                     onChange={(event) => setChequeNo(event.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-ink/60">Bank Name</label>
+                  <label className="text-xs text-ink/60 uppercase font-semibold">Bank Name</label>
                   <input
-                    className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                    className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                     value={bankName}
                     onChange={(event) => setBankName(event.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-ink/60">Cheque Date</label>
+                  <label className="text-xs text-ink/60 uppercase font-semibold">Cheque Date</label>
                   <input
-                    className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                    className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                     type="date"
                     value={chequeDate}
                     onChange={(event) => setChequeDate(event.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-ink/60">Cheque Status</label>
+                  <label className="text-xs text-ink/60 uppercase font-semibold">Cheque Status</label>
                   <select
-                    className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                    className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                     value={chequeStatus}
                     onChange={(event) => setChequeStatus(event.target.value)}
                   >
@@ -305,55 +412,74 @@ const PaymentsPage = () => {
             )}
 
             <div>
-              <label className="text-xs text-ink/60">Note</label>
+              <label className="text-xs text-ink/60 uppercase font-semibold">Note</label>
               <textarea
-                className="mt-1 w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                className="mt-1.5 w-full rounded-lg border border-slatewash px-3 py-3 text-base focus:ring-1 focus:ring-ink focus:outline-none"
                 rows="3"
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
-                placeholder="Optional note"
+                placeholder="Optional notes or references"
               />
             </div>
 
             <button
-              className="w-full rounded-lg bg-ink py-3 text-sm font-semibold text-sand disabled:opacity-60"
+              className="w-full rounded-lg bg-ink py-3.5 text-base font-semibold text-sand hover:bg-ink/90 transition disabled:opacity-60 shadow-md"
               type="button"
               onClick={handleReceivePayment}
               disabled={saving}
             >
-              {saving ? "Saving..." : "Record Payment"}
+              {saving ? "Saving Payment..." : "Record Payment"}
             </button>
           </div>
 
-          <div className="rounded-2xl bg-white/80 p-6 shadow space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-ink/70">Recent Payments</div>
-              <span className="text-xs text-ink/60">{payments.length} records</span>
+          {/* Credit Customers Sidebar (Takes 1/3 width) */}
+          <div className="lg:col-span-1 rounded-2xl bg-white/80 p-6 shadow flex flex-col max-h-[650px] space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-ink uppercase tracking-wider">Credit Customers</h3>
+              <p className="text-xs text-ink/60">Click on a customer to load their credit invoices.</p>
             </div>
-            <div className="space-y-3">
-              {payments.slice(0, 8).map((payment) => (
-                <div key={payment._id} className="rounded-xl bg-slatewash/60 p-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold">{payment.paymentNo}</div>
-                      <div className="text-xs text-ink/60">
-                        {payment.customer?.name || "Walk-in"} - {payment.paymentMethod}
+            
+            <input
+              className="w-full rounded-lg border border-slatewash px-3 py-2.5 text-sm focus:ring-1 focus:ring-ink focus:outline-none bg-white"
+              placeholder="Filter by name or phone..."
+              value={sidebarSearch}
+              onChange={(e) => setSidebarSearch(e.target.value)}
+            />
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[480px]">
+              {filteredCreditCustomers.length === 0 ? (
+                <div className="text-sm text-ink/40 py-4 text-center">No credit customers found.</div>
+              ) : (
+                filteredCreditCustomers.map((c) => {
+                  const isSelected = c._id === selectedCustomerId;
+                  return (
+                    <button
+                      key={c._id}
+                      type="button"
+                      className={`w-full p-3 text-left rounded-xl border transition-all text-sm flex flex-col gap-1 ${
+                        isSelected
+                          ? "bg-slatewash border-ink shadow-sm"
+                          : "bg-white/40 border-slatewash/60 hover:bg-slatewash/40 hover:border-slatewash"
+                      }`}
+                      onClick={() => handleSelectCustomer(c)}
+                    >
+                      <div className="font-semibold text-ink flex items-center justify-between">
+                        <span>{c.name}</span>
+                        <span className="text-sm font-bold text-clay">
+                          {formatCurrency(c.outstandingBalance)}
+                        </span>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-semibold">{formatCurrency(payment.amount)}</div>
-                      <div className="text-xs text-ink/60">{formatDateTime(payment.createdAt)}</div>
-                    </div>
-                  </div>
-                  {payment.paymentMethod === "cheque" && (
-                    <div className="mt-2 text-xs text-ink/60">
-                      {payment.chequeNo ? `Cheque No: ${payment.chequeNo}` : "Cheque No: -"} | {payment.bankName ? `Bank: ${payment.bankName}` : "Bank: -"}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {payments.length === 0 && (
-                <div className="text-sm text-ink/60">No payments recorded.</div>
+                      <div className="text-xs text-ink/60 flex items-center justify-between">
+                        <span>{c.phone || "No phone"}</span>
+                        {isSelected && (
+                          <span className="text-[10px] bg-ink text-sand px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>

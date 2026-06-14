@@ -1,8 +1,10 @@
 const Payment = require("../models/Payment");
 const Customer = require("../models/Customer");
+const Sale = require("../models/Sale");
+const Order = require("../models/Order");
 
 const receivePayment = async (req, res) => {
-  const { customer, amount, paymentMethod } = req.body;
+  const { customer, amount, paymentMethod, allocations = [] } = req.body;
 
   if (!customer) {
     return res.status(400).json({ message: "Customer is required" });
@@ -31,6 +33,43 @@ const receivePayment = async (req, res) => {
 
   if (activeTrip) {
     paymentData.tripId = activeTrip._id;
+  }
+
+  // Process allocations systematically
+  const processedAllocations = [];
+  if (allocations && Array.isArray(allocations)) {
+    for (const alloc of allocations) {
+      if (!alloc.invoice || !alloc.allocatedAmount) continue;
+
+      const sale = await Sale.findById(alloc.invoice);
+      if (sale) {
+        const allocAmt = Number(alloc.allocatedAmount);
+        sale.dueAmount = Math.max(sale.dueAmount - allocAmt, 0);
+        sale.paidAmount = (sale.paidAmount || 0) + allocAmt;
+        sale.paymentStatus = sale.dueAmount <= 0 ? "paid" : "partial";
+        await sale.save();
+
+        if (sale.orderId) {
+          const order = await Order.findById(sale.orderId);
+          if (order) {
+            order.dueAmount = Math.max(order.dueAmount - allocAmt, 0);
+            order.paidAmount = (order.paidAmount || 0) + allocAmt;
+            order.paymentStatus = sale.paymentStatus;
+            await order.save();
+          }
+        }
+
+        processedAllocations.push({
+          invoice: sale._id,
+          invoiceNo: sale.invoiceNo,
+          allocatedAmount: allocAmt
+        });
+      }
+    }
+  }
+
+  if (processedAllocations.length > 0) {
+    paymentData.allocations = processedAllocations;
   }
 
   const payment = await Payment.create(paymentData);

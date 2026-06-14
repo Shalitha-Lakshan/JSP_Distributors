@@ -108,11 +108,35 @@ const getLedger = async (req, res) => {
   });
 };
 
+const getUnpaidInvoices = async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+
+    const unpaidSales = await Sale.find({
+      customer: customer._id,
+      status: "active",
+      paymentStatus: { $in: ["credit", "partial"] },
+      dueAmount: { $gt: 0 }
+    })
+      .select("invoiceNo orderId netTotal paidAmount dueAmount createdAt")
+      .populate("orderId", "orderNo")
+      .sort({ createdAt: 1 });
+
+    return res.json(unpaidSales);
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to fetch unpaid invoices" });
+  }
+};
+
 module.exports = {
   createCustomer,
   listCustomers,
   getCustomer,
   updateCustomer,
   deleteCustomer,
-  getLedger
+  getLedger,
+  getUnpaidInvoices
 };

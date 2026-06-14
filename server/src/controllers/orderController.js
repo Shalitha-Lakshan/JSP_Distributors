@@ -440,31 +440,44 @@ const deliverOrder = async (req, res) => {
     }
 
     if (resolvedPaymentMethod === "cash" || resolvedPaymentMethod === "cheque") {
-      if (numericPaid > 0 && order.customer) {
-        const payment = await Payment.create({
-          paymentNo: `PAY-${Date.now()}`,
-          customer: order.customer,
-          amount: numericPaid,
-          paymentMethod: resolvedPaymentMethod,
-          receivedBy: req.user?._id,
-          allocations: [
-            {
-              invoice: sale._id,
-              invoiceNo: sale.invoiceNo,
-              allocatedAmount: numericPaid
-            }
-          ],
-          tripId: activeTrip ? activeTrip._id : undefined
-        });
+      const netCollected = sale.paidAmount - (sale.balance || 0);
+      if (netCollected > 0) {
+        if (order.customer) {
+          const payment = await Payment.create({
+            paymentNo: `PAY-${Date.now()}`,
+            customer: order.customer,
+            amount: netCollected,
+            paymentMethod: resolvedPaymentMethod,
+            receivedBy: req.user?._id,
+            allocations: [
+              {
+                invoice: sale._id,
+                invoiceNo: sale.invoiceNo,
+                allocatedAmount: netCollected
+              }
+            ],
+            tripId: activeTrip ? activeTrip._id : undefined
+          });
 
-        if (activeTrip) {
-          activeTrip.paymentsCollected.push(payment._id);
-          if (resolvedPaymentMethod === "cash") {
-            activeTrip.expectedCollections.cash = (activeTrip.expectedCollections.cash || 0) + numericPaid;
-          } else if (resolvedPaymentMethod === "cheque") {
-            activeTrip.expectedCollections.cheque = (activeTrip.expectedCollections.cheque || 0) + numericPaid;
+          if (activeTrip) {
+            activeTrip.paymentsCollected.push(payment._id);
+            if (resolvedPaymentMethod === "cash") {
+              activeTrip.expectedCollections.cash = (activeTrip.expectedCollections.cash || 0) + netCollected;
+            } else if (resolvedPaymentMethod === "cheque") {
+              activeTrip.expectedCollections.cheque = (activeTrip.expectedCollections.cheque || 0) + netCollected;
+            }
+            await activeTrip.save();
           }
-          await activeTrip.save();
+        } else {
+          // Walk-in order payment (no customer document), still collected during active trip
+          if (activeTrip) {
+            if (resolvedPaymentMethod === "cash") {
+              activeTrip.expectedCollections.cash = (activeTrip.expectedCollections.cash || 0) + netCollected;
+            } else if (resolvedPaymentMethod === "cheque") {
+              activeTrip.expectedCollections.cheque = (activeTrip.expectedCollections.cheque || 0) + netCollected;
+            }
+            await activeTrip.save();
+          }
         }
       }
     }
