@@ -30,7 +30,7 @@ const ProductsPage = () => {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryError, setCategoryError] = useState("");
 
-  const role = useMemo(() => localStorage.getItem("role") || "cashier", []);
+  const role = useMemo(() => localStorage.getItem("role") || "rep", []);
   const authHeader = useMemo(() => {
     const token = localStorage.getItem("token");
     return { Authorization: `Bearer ${token}` };

@@ -27,7 +27,7 @@ const register = async (req, res) => {
     return res.status(403).json({ message: "Admin registration is not allowed" });
   }
 
-  if (role && !["manager", "cashier"].includes(role)) {
+  if (role && !["manager", "rep"].includes(role)) {
     return res.status(400).json({ message: "Invalid role" });
   }
 
@@ -37,7 +37,7 @@ const register = async (req, res) => {
     email: email.toLowerCase(),
     phone,
     passwordHash,
-    role: role || "cashier",
+    role: role || "rep",
     approvalStatus: "pending",
     status: "inactive"
   });

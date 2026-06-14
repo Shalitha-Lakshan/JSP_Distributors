@@ -24,7 +24,7 @@ const listUsers = async (req, res) => {
 const approveUser = async (req, res) => {
   const { role } = req.body;
 
-  if (role && !["admin", "manager", "cashier"].includes(role)) {
+  if (role && !["admin", "manager", "rep"].includes(role)) {
     return res.status(400).json({ message: "Invalid role" });
   }
 
@@ -96,7 +96,7 @@ const updateStatus = async (req, res) => {
 const updateRole = async (req, res) => {
   const { role } = req.body;
 
-  if (!role || !["admin", "manager", "cashier"].includes(role)) {
+  if (!role || !["admin", "manager", "rep"].includes(role)) {
     return res.status(400).json({ message: "Invalid role" });
   }
 

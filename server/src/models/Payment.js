@@ -21,7 +21,8 @@ const paymentSchema = new mongoose.Schema(
     chequeStatus: { type: String, enum: ["pending", "cleared", "returned"] },
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     note: { type: String, trim: true },
-    allocations: { type: [allocationSchema], default: [] }
+    allocations: { type: [allocationSchema], default: [] },
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" }
   },
   { timestamps: true }
 );

@@ -10,7 +10,7 @@ const UsersPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
-  const [roleDraft, setRoleDraft] = useState("cashier");
+  const [roleDraft, setRoleDraft] = useState("rep");
   const [statusDraft, setStatusDraft] = useState("active");
   const [rejectionReason, setRejectionReason] = useState("");
 
@@ -42,7 +42,7 @@ const UsersPage = () => {
 
   const handleSelect = (user) => {
     setSelectedUser(user);
-    setRoleDraft(user.role || "cashier");
+    setRoleDraft(user.role || "rep");
     setStatusDraft(user.status || "active");
     setRejectionReason(user.rejectionReason || "");
   };
@@ -273,7 +273,7 @@ const UsersPage = () => {
                       onChange={(event) => setRoleDraft(event.target.value)}
                     >
                       <option value="manager">Manager</option>
-                      <option value="cashier">Cashier</option>
+                      <option value="rep">Rep</option>
                       <option value="admin">Admin</option>
                     </select>
                   </label>

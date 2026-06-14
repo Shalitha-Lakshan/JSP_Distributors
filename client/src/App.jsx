@@ -17,6 +17,7 @@ import InvoicePage from "./pages/InvoicePage";
 import DailyClosingPage from "./pages/DailyClosingPage";
 import ReportsPage from "./pages/ReportsPage";
 import UsersPage from "./pages/UsersPage";
+import TripManagementPage from "./pages/TripManagementPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 const App = () => (
@@ -44,6 +45,7 @@ const App = () => (
       <Route path="/invoices/:invoiceNo" element={<InvoicePage />} />
       <Route path="/reports/daily-closing" element={<DailyClosingPage />} />
       <Route path="/reports" element={<ReportsPage />} />
+      <Route path="/trips" element={<TripManagementPage />} />
       <Route
         path="/users"
         element={

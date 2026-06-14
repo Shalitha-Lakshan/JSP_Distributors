@@ -2,7 +2,7 @@ const Payment = require("../models/Payment");
 const Customer = require("../models/Customer");
 
 const receivePayment = async (req, res) => {
-  const { customer, amount } = req.body;
+  const { customer, amount, paymentMethod } = req.body;
 
   if (!customer) {
     return res.status(400).json({ message: "Customer is required" });
@@ -17,11 +17,34 @@ const receivePayment = async (req, res) => {
     return res.status(404).json({ message: "Customer not found" });
   }
 
-  const payment = await Payment.create({
+  const TripSession = require("../models/TripSession");
+  const activeTrip = await TripSession.findOne({
+    rep: req.user?._id,
+    status: "active"
+  });
+
+  const paymentData = {
     ...req.body,
     paymentNo: `PAY-${Date.now()}`,
     receivedBy: req.user?._id
-  });
+  };
+
+  if (activeTrip) {
+    paymentData.tripId = activeTrip._id;
+  }
+
+  const payment = await Payment.create(paymentData);
+
+  if (activeTrip) {
+    activeTrip.paymentsCollected.push(payment._id);
+    const method = paymentMethod || "cash";
+    if (method === "cash") {
+      activeTrip.expectedCollections.cash = (activeTrip.expectedCollections.cash || 0) + Number(amount);
+    } else if (method === "cheque") {
+      activeTrip.expectedCollections.cheque = (activeTrip.expectedCollections.cheque || 0) + Number(amount);
+    }
+    await activeTrip.save();
+  }
 
   const nextBalance = Math.max((customerDoc.outstandingBalance || 0) - Number(amount), 0);
   customerDoc.outstandingBalance = nextBalance;

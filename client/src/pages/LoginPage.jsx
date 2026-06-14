@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import api from "../api/client";
 
 const getRedirectPath = (role) => {
-  if (role === "cashier") {
+  if (role === "rep") {
     return "/pos";
   }
   if (role === "manager") {
@@ -111,7 +111,7 @@ const LoginPage = () => {
         <div className="rounded-3xl bg-white/90 p-8 shadow-lg">
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Welcome back</h2>
-            <p className="text-sm text-ink/60">Use your admin, manager, or cashier credentials.</p>
+            <p className="text-sm text-ink/60">Use your admin, manager, or sales representative credentials.</p>
           </div>
           <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
             <label className="text-sm font-semibold text-ink/70">

@@ -72,6 +72,11 @@ const Icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
     </svg>
   ),
+  trips: (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+    </svg>
+  ),
 };
 
 /* ─── Map route → icon key ──────────────────────────────────────────── */
@@ -86,6 +91,7 @@ const iconFor = (to) => {
   if (to.includes("customers"))         return Icons.customers;
   if (to.includes("payments"))          return Icons.payments;
   if (to.includes("sales"))             return Icons.sales;
+  if (to.includes("trips"))             return Icons.trips;
   if (to.includes("daily-closing"))     return Icons.closing;
   if (to.includes("reports"))           return Icons.reports;
   if (to.includes("users"))             return Icons.users;
@@ -105,6 +111,7 @@ const getNavItems = (role) => {
     return [
       { label: "Manager Dashboard",  to: "/dashboard/manager" },
       { label: "POS Billing",        to: "/pos" },
+      { label: "Trip Sessions",      to: "/trips" },
       { label: "Products",           to: "/products" },
       { label: "Stock Add",          to: "/stock/add" },
       { label: "Stock Batches",      to: "/stock/batches" },
@@ -124,6 +131,7 @@ const getNavItems = (role) => {
     return [
       { label: "Admin Dashboard",    to: "/dashboard/admin" },
       { label: "POS Billing",        to: "/pos" },
+      { label: "Trip Sessions",      to: "/trips" },
       { label: "Products",           to: "/products" },
       { label: "Stock Add",          to: "/stock/add" },
       { label: "Stock Batches",      to: "/stock/batches" },
@@ -137,6 +145,7 @@ const getNavItems = (role) => {
   }
 
   return [
+    { label: "Trip Sessions",        to: "/trips" },
     { label: "Create Order",         to: "/pos" },
     { label: "Sales",                to: "/sales" },
     { label: "Receive Payment",      to: "/payments" },

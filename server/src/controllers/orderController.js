@@ -3,6 +3,7 @@ const Customer = require("../models/Customer");
 const Product = require("../models/Product");
 const StockBatch = require("../models/StockBatch");
 const Payment = require("../models/Payment");
+const TripSession = require("../models/TripSession");
 const { createSaleFromPayload } = require("../services/salesService");
 
 const reserveStockForItems = async (items) => {
@@ -133,6 +134,15 @@ const createOrder = async (req, res) => {
   }
 
   try {
+    const activeTrip = await TripSession.findOne({
+      rep: req.user?._id,
+      status: "active"
+    });
+
+    if (req.user?.role === "rep" && !activeTrip) {
+      return res.status(400).json({ message: "You must have an active trip session to book orders." });
+    }
+
     if (customer) {
       const existingCustomer = await Customer.findById(customer);
       if (!existingCustomer) {
@@ -174,6 +184,13 @@ const createOrder = async (req, res) => {
       stockReserved: true
     });
 
+    if (activeTrip) {
+      order.tripId = activeTrip._id;
+      await order.save();
+      activeTrip.ordersBooked.push(order._id);
+      await activeTrip.save();
+    }
+
     return res.status(201).json(order);
   } catch (err) {
     return res.status(400).json({ message: err.message || "Failed to create order" });
@@ -182,8 +199,19 @@ const createOrder = async (req, res) => {
 
 const listOrders = async (req, res) => {
   const filter = {};
-  if (req.user?.role === "cashier" || req.query.mine === "true") {
+  if (req.user?.role === "rep" || req.query.mine === "true") {
     filter.cashier = req.user?._id;
+
+    // Scope strictly to active trip session for rep
+    const activeTrip = await TripSession.findOne({
+      rep: req.user?._id,
+      status: "active"
+    });
+    if (activeTrip) {
+      filter.tripId = activeTrip._id;
+    } else if (req.user?.role === "rep") {
+      filter.tripId = new (require("mongoose")).Types.ObjectId();
+    }
   }
 
   const orders = await Order.find(filter)
@@ -373,6 +401,11 @@ const deliverOrder = async (req, res) => {
   }
 
   try {
+    const activeTrip = await TripSession.findOne({
+      rep: req.user?._id,
+      status: "active"
+    });
+
     const sale = await createSaleFromPayload({
       items: deliveredItems,
       returns,
@@ -385,8 +418,17 @@ const deliverOrder = async (req, res) => {
       cashierId: req.user?._id,
       orderId: order._id,
       skipProductStockUpdate: order.stockReserved,
-      skipBatchUpdate: order.stockReserved
+      skipBatchUpdate: order.stockReserved,
+      tripId: activeTrip ? activeTrip._id : undefined
     });
+
+    if (activeTrip) {
+      order.tripId = activeTrip._id;
+      if (!activeTrip.ordersBooked.includes(order._id)) {
+        activeTrip.ordersBooked.push(order._id);
+        await activeTrip.save();
+      }
+    }
 
     const dueAmount = sale.dueAmount || 0;
     if (order.customer) {
@@ -399,7 +441,7 @@ const deliverOrder = async (req, res) => {
 
     if (resolvedPaymentMethod === "cash" || resolvedPaymentMethod === "cheque") {
       if (numericPaid > 0 && order.customer) {
-        await Payment.create({
+        const payment = await Payment.create({
           paymentNo: `PAY-${Date.now()}`,
           customer: order.customer,
           amount: numericPaid,
@@ -411,8 +453,19 @@ const deliverOrder = async (req, res) => {
               invoiceNo: sale.invoiceNo,
               allocatedAmount: numericPaid
             }
-          ]
+          ],
+          tripId: activeTrip ? activeTrip._id : undefined
         });
+
+        if (activeTrip) {
+          activeTrip.paymentsCollected.push(payment._id);
+          if (resolvedPaymentMethod === "cash") {
+            activeTrip.expectedCollections.cash = (activeTrip.expectedCollections.cash || 0) + numericPaid;
+          } else if (resolvedPaymentMethod === "cheque") {
+            activeTrip.expectedCollections.cheque = (activeTrip.expectedCollections.cheque || 0) + numericPaid;
+          }
+          await activeTrip.save();
+        }
       }
     }
 

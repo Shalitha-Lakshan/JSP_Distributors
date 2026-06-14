@@ -13,9 +13,9 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const router = express.Router();
 
 router.get("/", requireAuth, listOrders);
-router.post("/", requireAuth, requireRole(["admin", "manager", "cashier"]), createOrder);
+router.post("/", requireAuth, requireRole(["admin", "manager", "rep"]), createOrder);
 router.get("/:id", requireAuth, getOrder);
-router.put("/:id", requireAuth, requireRole(["admin", "manager", "cashier"]), updateOrder);
+router.put("/:id", requireAuth, requireRole(["admin", "manager", "rep"]), updateOrder);
 router.patch("/:id/cancel", requireAuth, cancelOrder);
 router.post("/:id/deliver", requireAuth, deliverOrder);
 router.delete("/:id", requireAuth, deleteOrder);

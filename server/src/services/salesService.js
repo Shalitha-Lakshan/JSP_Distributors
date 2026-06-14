@@ -14,7 +14,8 @@ const createSaleFromPayload = async ({
   cashierId,
   orderId,
   skipProductStockUpdate = false,
-  skipBatchUpdate = false
+  skipBatchUpdate = false,
+  tripId
 }) => {
   if (!items.length) {
     throw new Error("No items provided");
@@ -170,6 +171,7 @@ const createSaleFromPayload = async ({
     orderId,
     customer,
     cashier: cashierId,
+    tripId,
     items: normalizedItems,
     returns,
     orderTotal,

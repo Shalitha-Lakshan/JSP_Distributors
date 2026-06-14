@@ -8,7 +8,7 @@ const initialForm = {
   phone: "",
   password: "",
   confirmPassword: "",
-  role: "cashier"
+  role: "rep"
 };
 
 const RegisterPage = () => {
@@ -77,7 +77,7 @@ const RegisterPage = () => {
         <div className="rounded-3xl bg-white/90 p-8 shadow-lg">
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Create account</h2>
-            <p className="text-sm text-ink/60">Set up a new manager or cashier profile.</p>
+            <p className="text-sm text-ink/60">Set up a new manager or sales representative profile.</p>
           </div>
           <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
             <label className="text-sm font-semibold text-ink/70">
@@ -144,7 +144,7 @@ const RegisterPage = () => {
                 onChange={handleChange}
               >
                 <option value="manager">Manager</option>
-                <option value="cashier">Cashier</option>
+                <option value="rep">Sales Representative</option>
               </select>
             </label>
             {error && (
@@ -180,7 +180,7 @@ const RegisterPage = () => {
             Set up your POS team and keep daily operations moving.
           </h1>
           <p className="text-ink/70">
-            Create accounts for cashiers and admins, manage access levels, and track
+            Create accounts for reps and admins, manage access levels, and track
             every sale from the first bill to the daily closing report.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">

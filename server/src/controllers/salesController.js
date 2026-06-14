@@ -1,5 +1,7 @@
 const Sale = require("../models/Sale");
+const MonthlySalesSnapshot = require("../models/MonthlySalesSnapshot");
 const { createSaleFromPayload } = require("../services/salesService");
+const TripSession = require("../models/TripSession");
 
 const createSale = async (req, res) => {
   const {
@@ -32,8 +34,19 @@ const createSale = async (req, res) => {
 const listSales = async (req, res) => {
   const filter = {};
 
-  if (req.user?.role === "cashier" || req.query.mine === "true") {
+  if (req.user?.role === "rep" || req.query.mine === "true") {
     filter.cashier = req.user?._id;
+
+    // Scope strictly to active trip session for rep
+    const activeTrip = await TripSession.findOne({
+      rep: req.user?._id,
+      status: "active"
+    });
+    if (activeTrip) {
+      filter.tripId = activeTrip._id;
+    } else if (req.user?.role === "rep") {
+      filter.tripId = new (require("mongoose")).Types.ObjectId();
+    }
   }
 
   const sales = await Sale.find(filter)
@@ -75,11 +88,132 @@ const getSalePdf = async (_req, res) => {
   return res.status(501).json({ message: "PDF generation not implemented" });
 };
 
+/**
+ * DELETE /api/sales/tablet-cleanup
+ *
+ * End-of-Month Cleanup – 3 sequential steps:
+ *
+ * Step A  Aggregate revenue + profit from paid invoices older than 30 days,
+ *         grouped by calendar month.
+ *
+ * Step B  Upsert those totals into MonthlySalesSnapshot (addToSet so repeated
+ *         cleanups in the same month safely accumulate, not overwrite).
+ *
+ * Step C  Delete those exact invoices from the Sale collection.
+ *         Credit / partial / cancelled invoices are NEVER touched.
+ */
+const tabletCleanup = async (req, res) => {
+  try {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);  // older than 30 days
+
+    // ── Step A: Aggregate ─────────────────────────────────────────────────
+    // Group paid sales by YYYY-MM and sum revenue + profit.
+    // Profit = sum of (sellingLineTotal - lineTotal) across all batch records.
+    const monthlyAgg = await Sale.aggregate([
+      {
+        $match: {
+          paymentStatus: "paid",
+          status: { $ne: "cancelled" },
+          createdAt: { $lt: cutoff }
+        }
+      },
+      {
+        $project: {
+          month: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+          netTotal: 1,
+          // profit per sale = sum(sellingLineTotal) – sum(lineTotal) across items
+          saleProfit: {
+            $subtract: [
+              {
+                $sum: {
+                  $map: {
+                    input: "$items",
+                    as: "item",
+                    in: {
+                      $sum: {
+                        $map: {
+                          input: "$$item.usedBatches",
+                          as: "b",
+                          in: "$$b.sellingLineTotal"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                $sum: {
+                  $map: {
+                    input: "$items",
+                    as: "item",
+                    in: "$$item.lineTotal"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$month",
+          totalRevenue: { $sum: "$netTotal" },
+          totalProfit: { $sum: "$saleProfit" },
+          invoiceCount: { $sum: 1 }
+        }
+      }
+    ]);
+
+    if (monthlyAgg.length === 0) {
+      return res.json({
+        message: "No paid invoices older than 30 days found. Nothing to clean up.",
+        deletedCount: 0
+      });
+    }
+
+    // ── Step B: Upsert into MonthlySalesSnapshot ──────────────────────────
+    // Use $inc so multiple cleanups in the same month safely accumulate.
+    const upsertOps = monthlyAgg.map((row) => ({
+      updateOne: {
+        filter: { month: row._id },
+        update: {
+          $inc: {
+            totalRevenue: row.totalRevenue,
+            totalProfit: row.totalProfit,
+            invoiceCount: row.invoiceCount
+          }
+        },
+        upsert: true
+      }
+    }));
+
+    await MonthlySalesSnapshot.bulkWrite(upsertOps);
+
+    // ── Step C: Delete only those exact paid invoices ─────────────────────
+    const { deletedCount } = await Sale.deleteMany({
+      paymentStatus: "paid",
+      status: { $ne: "cancelled" },
+      createdAt: { $lt: cutoff }
+    });
+
+    return res.json({
+      message: `Cleanup complete. ${deletedCount} paid invoice(s) archived and removed.`,
+      deletedCount,
+      monthsArchived: monthlyAgg.map((r) => r._id)
+    });
+  } catch (err) {
+    console.error("tabletCleanup error:", err);
+    return res.status(500).json({ message: err.message || "Cleanup failed" });
+  }
+};
+
 module.exports = {
   createSale,
   listSales,
   getSale,
   getSaleByInvoice,
   cancelSale,
-  getSalePdf
+  getSalePdf,
+  tabletCleanup
 };

@@ -20,6 +20,11 @@ const PosPage = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(null);
+  
+  const [activeTrip, setActiveTrip] = useState(null);
+  const [checkingTrip, setCheckingTrip] = useState(true);
+  const role = useMemo(() => localStorage.getItem("role") || "rep", []);
+  const isRep = role === "rep";
 
   const authHeader = useMemo(() => {
     const token = localStorage.getItem("token");
@@ -29,19 +34,23 @@ const PosPage = () => {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      setCheckingTrip(true);
       try {
-        const [categoryRes, productRes, customerRes] = await Promise.all([
+        const [categoryRes, productRes, customerRes, tripRes] = await Promise.all([
           api.get("/api/categories", { headers: authHeader, params: { status: "active" } }),
           api.get("/api/products", { headers: authHeader, params: { status: "active" } }),
-          api.get("/api/customers", { headers: authHeader })
+          api.get("/api/customers", { headers: authHeader }),
+          api.get("/api/trips/active", { headers: authHeader }).catch(() => ({ data: null }))
         ]);
         setCategories(categoryRes.data || []);
         setProducts(productRes.data || []);
         setCustomers(customerRes.data || []);
+        setActiveTrip(tripRes.data || null);
       } catch (err) {
         setError(err.response?.data?.message || "Failed to load order data");
       } finally {
         setLoading(false);
+        setCheckingTrip(false);
       }
     };
 
@@ -258,6 +267,11 @@ const PosPage = () => {
     setError("");
     setSuccess(null);
 
+    if (isRep && !activeTrip) {
+      setError("You must have an active trip session to save orders. Please start one on the Trip Sessions page.");
+      return;
+    }
+
     if (!customerId && !isWalkIn) {
       setError("Select a customer or choose walk-in before saving the order.");
       return;
@@ -309,8 +323,44 @@ const PosPage = () => {
     );
   };
 
+  if (isRep && !activeTrip && !checkingTrip) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] bg-white/80 rounded-2xl p-8 shadow text-center space-y-4">
+        <div className="rounded-full bg-clay/10 p-4 text-clay">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h2 className="text-xl font-bold text-ink">Trip Session Required</h2>
+        <p className="text-ink/60 max-w-md">
+          To book orders in the field, you must have an active trip session. Please start a session first.
+        </p>
+        <button
+          onClick={() => navigate("/trips")}
+          className="rounded-lg bg-ink px-6 py-3 text-sm font-semibold text-sand hover:bg-ink/90 transition shadow"
+        >
+          Go to Trip Sessions
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <section className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+    <div className="space-y-4">
+      {activeTrip && (
+        <div className="flex items-center justify-between rounded-xl bg-leaf/10 border border-leaf/20 px-4 py-3 text-leaf text-sm font-medium">
+          <span>
+            Active Trip: <strong className="font-bold">{activeTrip.tripNo}</strong> (Route: {activeTrip.route})
+          </span>
+          <button
+            onClick={() => navigate("/trips")}
+            className="text-xs underline hover:text-leaf/80"
+          >
+            Manage Trip
+          </button>
+        </div>
+      )}
+      <section className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
       <div className="space-y-4">
         <div className="rounded-2xl bg-white/80 p-4 shadow">
           <div className="text-lg font-semibold">Create Order</div>
@@ -592,6 +642,7 @@ const PosPage = () => {
         </div>
       </div>
     </section>
+  </div>
   );
 };
 

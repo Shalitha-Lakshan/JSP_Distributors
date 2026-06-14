@@ -48,7 +48,8 @@ const orderSchema = new mongoose.Schema(
     },
     stockReserved: { type: Boolean, default: false },
     deliveryDate: { type: Date },
-    saleId: { type: mongoose.Schema.Types.ObjectId, ref: "Sale" }
+    saleId: { type: mongoose.Schema.Types.ObjectId, ref: "Sale" },
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" }
   },
   { timestamps: true }
 );

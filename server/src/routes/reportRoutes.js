@@ -15,7 +15,7 @@ const router = express.Router();
 router.get(
   "/daily-closing",
   requireAuth,
-  requireRole(["admin", "manager", "cashier"]),
+  requireRole(["admin", "manager", "rep"]),
   getDailyClosing
 );
 router.get("/monthly-sales", requireAuth, requireRole(["admin", "manager"]), getMonthlySales);

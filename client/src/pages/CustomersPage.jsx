@@ -28,7 +28,7 @@ const CustomersPage = () => {
     return { Authorization: `Bearer ${token}` };
   }, []);
 
-  const role = useMemo(() => localStorage.getItem("role") || "cashier", []);
+  const role = useMemo(() => localStorage.getItem("role") || "rep", []);
 
   const loadCustomers = async () => {
     setLoading(true);

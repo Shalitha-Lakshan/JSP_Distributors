@@ -4,6 +4,7 @@ const Customer = require("../models/Customer");
 const Product = require("../models/Product");
 const StockBatch = require("../models/StockBatch");
 const Return = require("../models/Return");
+const MonthlySalesSnapshot = require("../models/MonthlySalesSnapshot");
 
 const getDailyClosing = async (req, res) => {
   const dateParam = req.query.date;
@@ -11,12 +12,28 @@ const getDailyClosing = async (req, res) => {
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 
+  const match = {
+    createdAt: { $gte: start, $lt: end },
+    status: { $ne: "cancelled" }
+  };
+
+  if (req.user?.role === "rep") {
+    match.cashier = req.user._id;
+    const TripSession = require("../models/TripSession");
+    const activeTrip = await TripSession.findOne({
+      rep: req.user._id,
+      status: "active"
+    });
+    if (activeTrip) {
+      match.tripId = activeTrip._id;
+    } else {
+      match.tripId = new (require("mongoose")).Types.ObjectId();
+    }
+  }
+
   const [summary] = await Sale.aggregate([
     {
-      $match: {
-        createdAt: { $gte: start, $lt: end },
-        status: { $ne: "cancelled" }
-      }
+      $match: match
     },
     {
       $group: {
@@ -36,8 +53,125 @@ const getDailyClosing = async (req, res) => {
   });
 };
 
-const getMonthlySales = async (_req, res) => {
-  return res.status(501).json({ message: "Monthly sales report not implemented" });
+/**
+ * GET /api/reports/monthly-sales
+ *
+ * Returns a chart-ready array of monthly revenue + profit.
+ * Merges two data sources:
+ *   1. Live Sale documents (aggregated on the fly)
+ *   2. Archived MonthlySalesSnapshot documents (from past cleanups)
+ *
+ * Response shape:
+ *   [ { month: "2026-05", revenue: 0, profit: 0, invoiceCount: 0 }, ... ]
+ *
+ * Query params:
+ *   months  (optional, default 12) – how many months back to include
+ */
+const getMonthlySales = async (req, res) => {
+  try {
+    const monthsBack = Math.max(1, Math.min(Number(req.query.months || 12), 36));
+
+    // Build a date range: first day of (now - monthsBack) months through now
+    const now = new Date();
+    const rangeStart = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1);
+
+    // ── 1. Aggregate from live Sale collection ───────────────────────────
+    const liveSalesAgg = await Sale.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: rangeStart },
+          status: { $ne: "cancelled" }
+        }
+      },
+      {
+        $project: {
+          month: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+          netTotal: 1,
+          saleProfit: {
+            $subtract: [
+              {
+                $sum: {
+                  $map: {
+                    input: "$items",
+                    as: "item",
+                    in: {
+                      $sum: {
+                        $map: {
+                          input: "$$item.usedBatches",
+                          as: "b",
+                          in: "$$b.sellingLineTotal"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                $sum: {
+                  $map: {
+                    input: "$items",
+                    as: "item",
+                    in: "$$item.lineTotal"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$month",
+          revenue: { $sum: "$netTotal" },
+          profit: { $sum: "$saleProfit" },
+          invoiceCount: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // ── 2. Fetch archived snapshot records ──────────────────────────────
+    const rangeStartMonthStr = rangeStart.toISOString().slice(0, 7); // "YYYY-MM"
+    const snapshots = await MonthlySalesSnapshot.find({
+      month: { $gte: rangeStartMonthStr }
+    });
+
+    // ── 3. Merge into a single Map keyed by "YYYY-MM" ──────────────────────
+    const merged = new Map();
+
+    // Seed all months in range with zeros so the chart has a continuous x-axis
+    for (let i = 0; i < monthsBack; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1 - i), 1);
+      const key = d.toISOString().slice(0, 7);
+      merged.set(key, { month: key, revenue: 0, profit: 0, invoiceCount: 0 });
+    }
+
+    // Add archived snapshot totals
+    snapshots.forEach((snap) => {
+      const row = merged.get(snap.month) || { month: snap.month, revenue: 0, profit: 0, invoiceCount: 0 };
+      row.revenue      += snap.totalRevenue  || 0;
+      row.profit       += snap.totalProfit   || 0;
+      row.invoiceCount += snap.invoiceCount  || 0;
+      merged.set(snap.month, row);
+    });
+
+    // Add live sale aggregation totals (may overlap with snapshot months if
+    // a cleanup was run mid-month – live data is additive on top of snapshot)
+    liveSalesAgg.forEach((row) => {
+      const existing = merged.get(row._id) || { month: row._id, revenue: 0, profit: 0, invoiceCount: 0 };
+      existing.revenue      += row.revenue      || 0;
+      existing.profit       += row.profit       || 0;
+      existing.invoiceCount += row.invoiceCount || 0;
+      merged.set(row._id, existing);
+    });
+
+    // Sort chronologically
+    const chart = [...merged.values()].sort((a, b) => (a.month < b.month ? -1 : 1));
+
+    return res.json(chart);
+  } catch (err) {
+    console.error("getMonthlySales error:", err);
+    return res.status(500).json({ message: err.message || "Failed to generate monthly sales report" });
+  }
 };
 
 const getItemWise = async (_req, res) => {

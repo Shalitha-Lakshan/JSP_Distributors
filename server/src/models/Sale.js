@@ -69,7 +69,8 @@ const saleSchema = new mongoose.Schema(
       default: "paid"
     },
     saleType: { type: String, enum: ["walk-in", "credit"], default: "walk-in" },
-    status: { type: String, enum: ["active", "cancelled"], default: "active" }
+    status: { type: String, enum: ["active", "cancelled"], default: "active" },
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" }
   },
   { timestamps: true }
 );

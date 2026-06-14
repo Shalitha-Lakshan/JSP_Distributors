@@ -79,7 +79,7 @@ const createProduct = async (req, res) => {
 const listProducts = async (req, res) => {
   const filter = {};
 
-  if (req.user?.role === "cashier") {
+  if (req.user?.role === "rep") {
     filter.status = "active";
   } else if (req.query.status) {
     filter.status = req.query.status;
@@ -107,7 +107,7 @@ const searchProducts = async (req, res) => {
     ]
   };
 
-  if (req.user?.role === "cashier") {
+  if (req.user?.role === "rep") {
     filter.status = "active";
   }
 
@@ -189,7 +189,7 @@ const getProductByBarcode = async (req, res) => {
     return res.status(404).json({ message: "Product not found" });
   }
 
-  if (product.status !== "active" && req.user?.role === "cashier") {
+  if (product.status !== "active" && req.user?.role === "rep") {
     return res.status(403).json({ message: "Product inactive" });
   }
 

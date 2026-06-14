@@ -29,7 +29,7 @@ const ReportsPage = () => {
     return { Authorization: `Bearer ${token}` };
   }, []);
 
-  const role = useMemo(() => localStorage.getItem("role") || "cashier", []);
+  const role = useMemo(() => localStorage.getItem("role") || "rep", []);
 
   useEffect(() => {
     const load = async () => {
@@ -39,11 +39,11 @@ const ReportsPage = () => {
         const [salesRes, ordersRes, paymentsRes] = await Promise.all([
           api.get("/api/sales", {
             headers: authHeader,
-            params: role === "cashier" ? { mine: "true" } : undefined
+            params: role === "rep" ? { mine: "true" } : undefined
           }),
           api.get("/api/orders", {
             headers: authHeader,
-            params: role === "cashier" ? { mine: "true" } : undefined
+            params: role === "rep" ? { mine: "true" } : undefined
           }),
           api.get("/api/payments", { headers: authHeader })
         ]);
