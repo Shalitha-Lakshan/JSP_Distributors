@@ -5,59 +5,136 @@ const Product = require("../models/Product");
 const StockBatch = require("../models/StockBatch");
 const Return = require("../models/Return");
 const MonthlySalesSnapshot = require("../models/MonthlySalesSnapshot");
+const TripSession = require("../models/TripSession");
 
 const getDailyClosing = async (req, res) => {
-  const dateParam = req.query.date;
-  const date = dateParam ? new Date(dateParam) : new Date();
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  try {
+    const tripIdParam = req.query.tripId;
+    let activeTrip = null;
 
-  let match;
-
-  if (req.user?.role === "rep") {
-    const TripSession = require("../models/TripSession");
-    const activeTrip = await TripSession.findOne({
-      rep: req.user._id,
-      status: "active"
-    });
-    if (activeTrip) {
-      match = {
-        tripId: activeTrip._id,
-        status: { $ne: "cancelled" }
-      };
-    } else {
-      match = {
-        tripId: new (require("mongoose")).Types.ObjectId(),
-        status: { $ne: "cancelled" }
-      };
+    if (tripIdParam) {
+      activeTrip = await TripSession.findById(tripIdParam);
+    } else if (req.user?.role === "rep") {
+      activeTrip = await TripSession.findOne({
+        rep: req.user._id,
+        status: "active"
+      });
     }
-  } else {
-    match = {
-      createdAt: { $gte: start, $lt: end },
-      status: { $ne: "cancelled" }
-    };
-  }
 
-  const [summary] = await Sale.aggregate([
-    {
-      $match: match
-    },
-    {
-      $group: {
-        _id: null,
-        grossSales: { $sum: "$orderTotal" },
-        returnsAdjusted: { $sum: "$returnTotal" },
-        netSales: { $sum: "$netTotal" }
+    // A. Active Trip Session Scoped
+    if (activeTrip || (req.user?.role === "rep" && !activeTrip)) {
+      if (!activeTrip) {
+        return res.json({
+          date: new Date(),
+          grossSales: 0,
+          returns: 0,
+          expenses: 0,
+          netSales: 0,
+          discounts: 0,
+          netCashCollection: 0,
+          tripNo: "-",
+          route: "-"
+        });
       }
-    }
-  ]);
 
-  return res.json({
-    date: start,
-    grossSales: summary?.grossSales || 0,
-    returnsAdjusted: summary?.returnsAdjusted || 0,
-    netSales: summary?.netSales || 0
-  });
+      const [summary] = await Sale.aggregate([
+        {
+          $match: {
+            tripId: activeTrip._id,
+            status: { $ne: "cancelled" }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            grossSales: { $sum: "$orderTotal" },
+            returns: { $sum: "$returnTotal" },
+            discounts: { $sum: "$discount" },
+            netSales: { $sum: "$netTotal" }
+          }
+        }
+      ]);
+
+      const expenses = (activeTrip.expenses || []).reduce((sum, e) => sum + e.amount, 0);
+      const netCashCollection = (activeTrip.expectedCollections?.cash || 0) - expenses;
+
+      return res.json({
+        date: activeTrip.createdAt,
+        grossSales: summary?.grossSales || 0,
+        returns: summary?.returns || 0,
+        expenses,
+        netSales: summary?.netSales || 0,
+        discounts: summary?.discounts || 0,
+        netCashCollection,
+        tripNo: activeTrip.tripNo,
+        route: activeTrip.route
+      });
+    }
+
+    // B. Date-Based Global Summary for Manager/Admin
+    const dateParam = req.query.date;
+    const date = dateParam ? new Date(dateParam) : new Date();
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+
+    const [summary] = await Sale.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start, $lt: end },
+          status: { $ne: "cancelled" }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          grossSales: { $sum: "$orderTotal" },
+          returns: { $sum: "$returnTotal" },
+          discounts: { $sum: "$discount" },
+          netSales: { $sum: "$netTotal" }
+        }
+      }
+    ]);
+
+    // Sum expenses from all trips active/started in this range
+    const trips = await TripSession.find({
+      startTime: { $gte: start, $lt: end }
+    });
+    const totalExpenses = trips.reduce((sum, t) => {
+      return sum + (t.expenses || []).reduce((s, e) => s + e.amount, 0);
+    }, 0);
+
+    // Sum cash collections from Payments
+    const cashPayments = await Payment.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start, $lt: end },
+          paymentMethod: "cash"
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" }
+        }
+      }
+    ]);
+    const totalCashCollected = cashPayments[0]?.total || 0;
+    const netCashCollection = totalCashCollected - totalExpenses;
+
+    return res.json({
+      date: start,
+      grossSales: summary?.grossSales || 0,
+      returns: summary?.returns || 0,
+      expenses: totalExpenses,
+      netSales: summary?.netSales || 0,
+      discounts: summary?.discounts || 0,
+      netCashCollection,
+      tripNo: "-",
+      route: "-"
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to calculate daily closing report" });
+  }
 };
 
 /**

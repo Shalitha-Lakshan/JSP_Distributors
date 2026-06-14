@@ -26,6 +26,12 @@ const tripSessionSchema = new mongoose.Schema(
     },
     ordersBooked: [{ type: mongoose.Schema.Types.ObjectId, ref: "Order" }],
     paymentsCollected: [{ type: mongoose.Schema.Types.ObjectId, ref: "Payment" }],
+    expenses: [
+      {
+        reason: { type: String, required: true },
+        amount: { type: Number, required: true, min: 0 }
+      }
+    ],
     auditedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     auditedAt: { type: Date },
     auditNotes: { type: String, trim: true }

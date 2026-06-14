@@ -444,8 +444,8 @@ const TripManagementPage = () => {
                   </div>
                 </div>
 
-                {/* Lists of booked orders/payments */}
-                <div className="grid gap-6 md:grid-cols-2">
+                {/* Lists of booked orders/payments/expenses */}
+                <div className="grid gap-6 md:grid-cols-3">
                   {/* Booked orders */}
                   <div className="space-y-3">
                     <h4 className="text-xs font-semibold uppercase text-ink/60">Orders Booked ({selectedTrip.ordersBooked?.length || 0})</h4>
@@ -480,6 +480,24 @@ const TripManagementPage = () => {
                       ))}
                       {!selectedTrip.paymentsCollected?.length && (
                         <div className="text-center py-6 text-xs text-ink/40">No payments collected.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Trip Expenses */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-semibold uppercase text-ink/60">Trip Expenses ({(selectedTrip.expenses || []).length})</h4>
+                    <div className="max-h-[220px] overflow-y-auto rounded-xl border border-slatewash p-2 space-y-2">
+                      {(selectedTrip.expenses || []).map((exp, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs bg-slatewash/40 p-2.5 rounded-lg">
+                          <div>
+                            <div className="font-semibold text-ink">{exp.reason}</div>
+                          </div>
+                          <div className="font-bold text-clay">{formatCurrency(exp.amount)}</div>
+                        </div>
+                      ))}
+                      {!(selectedTrip.expenses || []).length && (
+                        <div className="text-center py-6 text-xs text-ink/40">No expenses recorded.</div>
                       )}
                     </div>
                   </div>

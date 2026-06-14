@@ -180,11 +180,67 @@ const getTripDetails = async (req, res) => {
   }
 };
 
+// POST /api/trips/active/expenses
+const addExpense = async (req, res) => {
+  const { reason, amount } = req.body;
+
+  if (!reason || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ message: "Reason and a valid amount greater than 0 are required" });
+  }
+
+  try {
+    const trip = await TripSession.findOne({
+      rep: req.user._id,
+      status: "active"
+    });
+
+    if (!trip) {
+      return res.status(404).json({ message: "No active trip session found." });
+    }
+
+    trip.expenses = trip.expenses || [];
+    trip.expenses.push({ reason, amount: Number(amount) });
+    await trip.save();
+
+    return res.status(201).json(trip);
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to add expense" });
+  }
+};
+
+// DELETE /api/trips/active/expenses/:index
+const deleteExpense = async (req, res) => {
+  try {
+    const trip = await TripSession.findOne({
+      rep: req.user._id,
+      status: "active"
+    });
+
+    if (!trip) {
+      return res.status(404).json({ message: "No active trip session found." });
+    }
+
+    const index = Number(req.params.index);
+    if (isNaN(index) || index < 0 || index >= (trip.expenses || []).length) {
+      return res.status(400).json({ message: "Invalid expense index" });
+    }
+
+    trip.expenses.splice(index, 1);
+    await trip.save();
+
+    return res.json(trip);
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to delete expense" });
+  }
+};
+
 module.exports = {
   startTrip,
   getActiveTrip,
   submitAudit,
   approveTrip,
   listTrips,
-  getTripDetails
+  getTripDetails,
+  addExpense,
+  deleteExpense
 };

@@ -2,6 +2,8 @@ const Sale = require("../models/Sale");
 const MonthlySalesSnapshot = require("../models/MonthlySalesSnapshot");
 const { createSaleFromPayload } = require("../services/salesService");
 const TripSession = require("../models/TripSession");
+const Customer = require("../models/Customer");
+const Payment = require("../models/Payment");
 
 const createSale = async (req, res) => {
   const {
@@ -15,6 +17,13 @@ const createSale = async (req, res) => {
   } = req.body;
 
   try {
+    // 1. Check if the current user has an active trip session
+    const activeTrip = await TripSession.findOne({
+      rep: req.user?._id,
+      status: "active"
+    });
+
+    // 2. Create the sale with the active trip ID associated
     const sale = await createSaleFromPayload({
       items,
       returns,
@@ -23,8 +32,55 @@ const createSale = async (req, res) => {
       paymentMethod,
       customer,
       saleType,
-      cashierId: req.user?._id
+      cashierId: req.user?._id,
+      tripId: activeTrip ? activeTrip._id : undefined
     });
+
+    const netCollected = sale.paidAmount - (sale.balance || 0);
+
+    // 3. Update customer outstanding balance if a customer is selected
+    if (customer) {
+      // If it has due amount, increase outstanding balance
+      if (sale.dueAmount > 0) {
+        await Customer.findByIdAndUpdate(customer, {
+          $inc: { outstandingBalance: sale.dueAmount }
+        });
+      }
+
+      // If a payment is collected at POS, record it as a Payment transaction
+      if (netCollected > 0) {
+        const payment = await Payment.create({
+          paymentNo: `PAY-${Date.now()}`,
+          customer,
+          amount: netCollected,
+          paymentMethod,
+          receivedBy: req.user?._id,
+          allocations: [
+            {
+              invoice: sale._id,
+              invoiceNo: sale.invoiceNo,
+              allocatedAmount: netCollected
+            }
+          ],
+          tripId: activeTrip ? activeTrip._id : undefined
+        });
+
+        if (activeTrip) {
+          activeTrip.paymentsCollected.push(payment._id);
+        }
+      }
+    }
+
+    // 4. Update expected collections on the active trip
+    if (activeTrip && netCollected > 0) {
+      if (paymentMethod === "cash") {
+        activeTrip.expectedCollections.cash = (activeTrip.expectedCollections.cash || 0) + netCollected;
+      } else if (paymentMethod === "cheque") {
+        activeTrip.expectedCollections.cheque = (activeTrip.expectedCollections.cheque || 0) + netCollected;
+      }
+      await activeTrip.save();
+    }
+
     return res.status(201).json(sale);
   } catch (err) {
     return res.status(400).json({ message: err.message || "Failed to complete sale" });
