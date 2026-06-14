@@ -12,23 +12,30 @@ const getDailyClosing = async (req, res) => {
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 
-  const match = {
-    createdAt: { $gte: start, $lt: end },
-    status: { $ne: "cancelled" }
-  };
+  let match;
 
   if (req.user?.role === "rep") {
-    match.cashier = req.user._id;
     const TripSession = require("../models/TripSession");
     const activeTrip = await TripSession.findOne({
       rep: req.user._id,
       status: "active"
     });
     if (activeTrip) {
-      match.tripId = activeTrip._id;
+      match = {
+        tripId: activeTrip._id,
+        status: { $ne: "cancelled" }
+      };
     } else {
-      match.tripId = new (require("mongoose")).Types.ObjectId();
+      match = {
+        tripId: new (require("mongoose")).Types.ObjectId(),
+        status: { $ne: "cancelled" }
+      };
     }
+  } else {
+    match = {
+      createdAt: { $gte: start, $lt: end },
+      status: { $ne: "cancelled" }
+    };
   }
 
   const [summary] = await Sale.aggregate([

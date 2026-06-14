@@ -92,8 +92,25 @@ const receivePayment = async (req, res) => {
   return res.status(201).json(payment);
 };
 
-const listPayments = async (_req, res) => {
-  const payments = await Payment.find()
+const listPayments = async (req, res) => {
+  const filter = {};
+
+  if (req.user?.role === "rep" || req.query.mine === "true") {
+    filter.receivedBy = req.user?._id;
+
+    const TripSession = require("../models/TripSession");
+    const activeTrip = await TripSession.findOne({
+      rep: req.user?._id,
+      status: "active"
+    });
+    if (activeTrip) {
+      filter.tripId = activeTrip._id;
+    } else if (req.user?.role === "rep") {
+      filter.tripId = new (require("mongoose")).Types.ObjectId();
+    }
+  }
+
+  const payments = await Payment.find(filter)
     .sort({ createdAt: -1 })
     .populate("customer", "name")
     .populate("receivedBy", "name");

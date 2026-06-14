@@ -15,6 +15,8 @@ const DailyClosingPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const isRep = useMemo(() => localStorage.getItem("role") === "rep", []);
+
   const authHeader = useMemo(() => {
     const token = localStorage.getItem("token");
     return { Authorization: `Bearer ${token}` };
@@ -58,12 +60,14 @@ const DailyClosingPage = () => {
   }, [selectedDate]);
 
   const salesToday = useMemo(
-    () =>
-      sales.filter((sale) => {
+    () => {
+      if (isRep) return sales;
+      return sales.filter((sale) => {
         const created = new Date(sale.createdAt);
         return created >= dateRange.start && created <= dateRange.end;
-      }),
-    [sales, dateRange]
+      });
+    },
+    [sales, dateRange, isRep]
   );
 
   const activeSalesToday = useMemo(
@@ -77,25 +81,31 @@ const DailyClosingPage = () => {
   );
 
   const paymentsToday = useMemo(
-    () =>
-      payments.filter((payment) => {
+    () => {
+      if (isRep) return payments;
+      return payments.filter((payment) => {
         const created = new Date(payment.createdAt);
         return created >= dateRange.start && created <= dateRange.end;
-      }),
-    [payments, dateRange]
+      });
+    },
+    [payments, dateRange, isRep]
   );
 
   const pendingOrdersToday = useMemo(
-    () =>
-      orders.filter((order) => {
+    () => {
+      if (isRep) {
+        return orders.filter((order) => order.orderStatus === "pending_delivery");
+      }
+      return orders.filter((order) => {
         const created = new Date(order.createdAt);
         return (
           created >= dateRange.start &&
           created <= dateRange.end &&
           order.orderStatus === "pending_delivery"
         );
-      }),
-    [orders, dateRange]
+      });
+    },
+    [orders, dateRange, isRep]
   );
 
   const cashCollection = useMemo(
@@ -133,15 +143,21 @@ const DailyClosingPage = () => {
             <h1 className="text-2xl font-semibold">Daily Closing</h1>
             <p className="text-ink/60">Daily sales, returns, collections, and pending deliveries.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-ink/60">Date</label>
-            <input
-              className="rounded-lg border border-slatewash px-3 py-2 text-sm"
-              type="date"
-              value={selectedDate}
-              onChange={(event) => setSelectedDate(event.target.value)}
-            />
-          </div>
+          {isRep ? (
+            <div className="rounded-full bg-leaf/10 border border-leaf/30 px-4 py-2 text-xs font-semibold text-leaf animate-pulse">
+              Active Trip Session Metrics
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-ink/60">Date</label>
+              <input
+                className="rounded-lg border border-slatewash px-3 py-2 text-sm"
+                type="date"
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value)}
+              />
+            </div>
+          )}
         </div>
       </div>
 

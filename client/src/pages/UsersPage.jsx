@@ -4,6 +4,13 @@ import api from "../api/client";
 const formatDate = (value) =>
   value ? new Date(value).toLocaleDateString("en-LK") : "-";
 
+const formatRoleName = (role) => {
+  if (role === "rep") return "Sales Representative";
+  if (role === "manager") return "Manager";
+  if (role === "admin") return "Admin";
+  return role;
+};
+
 const UsersPage = () => {
   const [pendingUsers, setPendingUsers] = useState([]);
   const [approvedUsers, setApprovedUsers] = useState([]);
@@ -156,7 +163,7 @@ const UsersPage = () => {
                       <tr key={user._id}>
                         <td className="py-2 pr-4 font-semibold">{user.name}</td>
                         <td className="py-2 pr-4">{user.email}</td>
-                        <td className="py-2 pr-4">{user.role}</td>
+                        <td className="py-2 pr-4">{formatRoleName(user.role)}</td>
                         <td className="py-2 pr-4">{formatDate(user.createdAt)}</td>
                         <td className="py-2 pr-4">
                           <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
@@ -220,7 +227,7 @@ const UsersPage = () => {
                       <tr key={user._id}>
                         <td className="py-2 pr-4 font-semibold">{user.name}</td>
                         <td className="py-2 pr-4">{user.email}</td>
-                        <td className="py-2 pr-4">{user.role}</td>
+                        <td className="py-2 pr-4">{formatRoleName(user.role)}</td>
                         <td className="py-2 pr-4">
                           <span className="rounded-full bg-leaf/10 px-2 py-1 text-xs font-semibold text-leaf">
                             {user.status}
@@ -273,7 +280,7 @@ const UsersPage = () => {
                       onChange={(event) => setRoleDraft(event.target.value)}
                     >
                       <option value="manager">Manager</option>
-                      <option value="rep">Rep</option>
+                      <option value="rep">Sales Representative</option>
                       <option value="admin">Admin</option>
                     </select>
                   </label>

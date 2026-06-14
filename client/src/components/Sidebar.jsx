@@ -169,6 +169,13 @@ const getStoredUser = () => {
 const getInitials = (name) =>
   name.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
 
+const formatRoleName = (role) => {
+  if (role === "rep") return "Sales Representative";
+  if (role === "manager") return "Manager";
+  if (role === "admin") return "Admin";
+  return role;
+};
+
 /* ─── Component ─────────────────────────────────────────────────────── */
 const Sidebar = ({ collapsed, onToggle }) => {
   const navigate = useNavigate();
@@ -267,7 +274,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
               rounded-lg bg-gray-900 px-2.5 py-1.5 text-xs text-white
               opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl
             ">
-              {user.name} · {user.role}
+              {user.name} · {formatRoleName(user.role)}
             </span>
           </div>
         ) : (
@@ -279,7 +286,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
               </div>
               <div className="min-w-0">
                 <div className="text-sm font-semibold truncate">{user.name}</div>
-                <div className="text-xs text-sand/70 truncate">{user.role}</div>
+                <div className="text-xs text-sand/70 truncate">{formatRoleName(user.role)}</div>
               </div>
             </div>
             {user.email && (

@@ -30,6 +30,13 @@ const getInitials = (name) =>
     .map((part) => part[0].toUpperCase())
     .join("");
 
+const formatRoleName = (role) => {
+  if (role === "rep") return "Sales Representative";
+  if (role === "manager") return "Manager";
+  if (role === "admin") return "Admin";
+  return role;
+};
+
 const TopBar = ({ onToggleSidebar, collapsed }) => {
   const navigate = useNavigate();
   const user = getStoredUser();
@@ -73,7 +80,7 @@ const TopBar = ({ onToggleSidebar, collapsed }) => {
       <div className="flex items-center gap-3">
         <div className="hidden sm:block text-right">
           <div className="text-sm font-semibold">{user.name}</div>
-          <div className="text-xs text-ink/60">{user.role}</div>
+          <div className="text-xs text-ink/60">{formatRoleName(user.role)}</div>
         </div>
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-clay text-white text-sm font-bold shrink-0">
           {getInitials(user.name)}
