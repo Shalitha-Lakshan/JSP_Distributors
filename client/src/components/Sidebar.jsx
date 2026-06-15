@@ -77,6 +77,11 @@ const Icons = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
     </svg>
   ),
+  returns: (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeMiterlimit="10" d="M16 15v-6a4 4 0 00-4-4H4m0 0l4-4m-4 4l4 4m-4 4h8a4 4 0 014 4v2" />
+    </svg>
+  ),
 };
 
 /* ─── Map route → icon key ──────────────────────────────────────────── */
@@ -93,6 +98,7 @@ const iconFor = (to) => {
   if (to.includes("sales"))             return Icons.sales;
   if (to.includes("trips"))             return Icons.trips;
   if (to.includes("daily-closing"))     return Icons.closing;
+  if (to.includes("returns"))           return Icons.returns;
   if (to.includes("reports"))           return Icons.reports;
   if (to.includes("users"))             return Icons.users;
   if (to.includes("products") && to.includes("low-stock")) return Icons.warning;
@@ -135,7 +141,8 @@ const getNavItems = (role) => {
       {
         section: "Analytics & Closing",
         items: [
-          { label: "Reports & Returns",  to: "/reports" },
+          { label: "Reports",            to: "/reports" },
+          { label: "Returns",            to: "/returns" },
           { label: "Daily Closing",      to: "/reports/daily-closing" },
         ]
       }
@@ -172,6 +179,7 @@ const getNavItems = (role) => {
         section: "Analytics & Closing",
         items: [
           { label: "Reports",            to: "/reports" },
+          { label: "Returns",            to: "/returns" },
           { label: "Daily Closing",      to: "/reports/daily-closing" },
         ]
       }

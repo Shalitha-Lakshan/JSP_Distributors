@@ -99,6 +99,13 @@ const SalesHistoryPage = () => {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [saving, setSaving] = useState(false);
 
+  // Advanced Filters
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
   // ── End-of-Month Cleanup state ────────────────────────────────────────
   // States: 'idle' | 'confirm' | 'working' | 'done' | 'error'
   const [cleanupState, setCleanupState] = useState("idle");
@@ -202,9 +209,65 @@ const SalesHistoryPage = () => {
     loadOrders();
   }, [role]);
 
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const query = search.trim().toLowerCase();
+      const customerName = order.customer?.name || "Walk-in";
+      const cashierName = order.cashier?.name || "";
+      const orderNo = order.orderNo || "";
+      
+      const matchesSearch =
+        !query ||
+        `${orderNo} ${customerName} ${cashierName}`.toLowerCase().includes(query);
+
+      const matchesStatus =
+        statusFilter === "all" ? true : order.orderStatus === statusFilter;
+
+      const matchesPayment =
+        paymentFilter === "all" ? true : order.paymentStatus === paymentFilter;
+
+      let matchesDate = true;
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        matchesDate = matchesDate && new Date(order.createdAt) >= start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        matchesDate = matchesDate && new Date(order.createdAt) <= end;
+      }
+
+      return matchesSearch && matchesStatus && matchesPayment && matchesDate;
+    });
+  }, [orders, search, statusFilter, paymentFilter, startDate, endDate]);
+
+  const salesStats = useMemo(() => {
+    let salesTotal = 0;
+    let returnsTotal = 0;
+    let pendingCount = 0;
+    
+    filteredOrders.forEach((o) => {
+      if (o.orderStatus !== "cancelled") {
+        salesTotal += o.netTotal || o.orderTotal || 0;
+        returnsTotal += o.returnTotal || 0;
+      }
+      if (o.orderStatus === "pending_delivery") {
+        pendingCount++;
+      }
+    });
+
+    return {
+      salesTotal,
+      returnsTotal,
+      pendingCount,
+      count: filteredOrders.length
+    };
+  }, [filteredOrders]);
+
   const grouped = useMemo(() => {
     const map = new Map();
-    orders.forEach((order) => {
+    filteredOrders.forEach((order) => {
       const dateKey = new Date(order.createdAt).toISOString().slice(0, 10);
       if (!map.has(dateKey)) {
         map.set(dateKey, []);
@@ -212,7 +275,7 @@ const SalesHistoryPage = () => {
       map.get(dateKey).push(order);
     });
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [orders]);
+  }, [filteredOrders]);
 
   const resetModal = () => {
     setSelectedOrder(null);
@@ -818,107 +881,216 @@ const SalesHistoryPage = () => {
 
   return (
     <section className="space-y-6">
-      {/* ── Page header with End-of-Month Cleanup button ── */}
-      <div className="rounded-2xl bg-white/80 p-6 shadow">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">Sales</h1>
-            <p className="text-ink/60">Orders grouped by date for delivery and payment.</p>
-          </div>
-
-          {/* Cleanup button – visible to admin only */}
-          {role === "admin" && (
-            <div className="flex flex-col items-end gap-2">
-              {cleanupState === "idle" && (
-                <button
-                  id="btn-tablet-cleanup"
-                  type="button"
-                  onClick={() => setCleanupState("confirm")}
-                  className="flex items-center gap-2 rounded-xl border border-clay/40 bg-clay/10 px-4 py-2 text-sm font-semibold text-clay hover:bg-clay/20 transition"
-                >
-                  {/* trash icon */}
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  Clear Paid Bills
-                </button>
-              )}
-
-              {cleanupState === "confirm" && (
-                <div className="rounded-xl border border-clay/30 bg-clay/5 p-4 text-sm text-ink shadow">
-                  <p className="font-semibold text-clay mb-1">⚠ End-of-Month Cleanup</p>
-                  <p className="text-ink/70 mb-3">
-                    This will permanently delete all <strong>fully-paid</strong> invoices older than 30 days.
-                    Their totals will be archived to the snapshot history first.
-                    <br /><strong>Credit &amp; partial bills are never deleted.</strong>
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      id="btn-cleanup-confirm"
-                      onClick={handleTabletCleanup}
-                      className="rounded-lg bg-clay px-4 py-2 text-xs font-bold text-white hover:bg-clay/90 transition"
-                    >
-                      Yes, Archive &amp; Delete
-                    </button>
-                    <button
-                      type="button"
-                      id="btn-cleanup-cancel"
-                      onClick={() => setCleanupState("idle")}
-                      className="rounded-lg border border-ink/20 px-4 py-2 text-xs font-semibold hover:bg-slatewash transition"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {cleanupState === "working" && (
-                <div className="rounded-xl border border-slatewash bg-slatewash/50 px-4 py-2 text-sm text-ink/60">
-                  Archiving &amp; cleaning up…
-                </div>
-              )}
-
-              {cleanupState === "done" && (
-                <div className="rounded-xl border border-leaf/30 bg-leaf/10 px-4 py-3 text-sm text-leaf">
-                  <p className="font-semibold">✓ {cleanupResult?.message}</p>
-                  {cleanupResult?.monthsArchived?.length > 0 && (
-                    <p className="text-xs mt-1 text-ink/60">
-                      Months archived: {cleanupResult.monthsArchived.join(", ")}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="mt-2 text-xs underline text-ink/50"
-                    onClick={() => { setCleanupState("idle"); setCleanupResult(null); }}
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-
-              {cleanupState === "error" && (
-                <div className="rounded-xl border border-clay/30 bg-clay/10 px-4 py-3 text-sm text-clay">
-                  <p>{cleanupResult?.message || "Cleanup failed."}</p>
-                  <button
-                    type="button"
-                    className="mt-2 text-xs underline"
-                    onClick={() => { setCleanupState("idle"); setCleanupResult(null); }}
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+      {/* Page Header */}
+      <div className="rounded-2xl bg-white/80 p-6 shadow border-l-4 border-ink flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-ink font-display">Sales History</h1>
+          <p className="text-sm text-ink/60 mt-0.5">
+            Monitor transaction records, track invoice statuses, log returns, and manage deliveries.
+          </p>
         </div>
+
+        {/* Cleanup button – visible to admin only */}
+        {role === "admin" && (
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            {cleanupState === "idle" && (
+              <button
+                id="btn-tablet-cleanup"
+                type="button"
+                onClick={() => setCleanupState("confirm")}
+                className="flex items-center gap-2 rounded-xl border border-clay/40 bg-clay/10 px-4 py-2.5 text-xs font-bold text-clay hover:bg-clay/20 transition shadow-sm"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Clear Paid Bills
+              </button>
+            )}
+
+            {cleanupState === "confirm" && (
+              <div className="rounded-xl border border-clay/30 bg-clay/5 p-4 text-xs text-ink shadow max-w-sm">
+                <p className="font-bold text-clay mb-1">⚠ End-of-Month Cleanup</p>
+                <p className="text-ink/70 mb-3 leading-relaxed">
+                  This will permanently delete all <strong>fully-paid</strong> invoices older than 30 days.
+                  Their totals will be archived to the snapshot history first.
+                  <br /><strong>Credit &amp; partial bills are never deleted.</strong>
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    id="btn-cleanup-confirm"
+                    onClick={handleTabletCleanup}
+                    className="rounded-lg bg-clay px-3 py-1.5 font-bold text-white hover:bg-clay/90 transition text-[10px]"
+                  >
+                    Yes, Archive &amp; Delete
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-cleanup-cancel"
+                    onClick={() => setCleanupState("idle")}
+                    className="rounded-lg border border-ink/20 px-3 py-1.5 font-semibold hover:bg-slatewash transition text-[10px]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {cleanupState === "working" && (
+              <div className="rounded-xl border border-slatewash bg-slatewash/50 px-4 py-2 text-xs text-ink/60">
+                Archiving &amp; cleaning up…
+              </div>
+            )}
+
+            {cleanupState === "done" && (
+              <div className="rounded-xl border border-leaf/30 bg-leaf/10 px-4 py-3 text-xs text-leaf">
+                <p className="font-bold">✓ {cleanupResult?.message}</p>
+                {cleanupResult?.monthsArchived?.length > 0 && (
+                  <p className="text-[10px] mt-1 text-ink/60">
+                    Months archived: {cleanupResult.monthsArchived.join(", ")}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="mt-2 text-[10px] underline text-ink/50"
+                  onClick={() => { setCleanupState("idle"); setCleanupResult(null); }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {cleanupState === "error" && (
+              <div className="rounded-xl border border-clay/30 bg-clay/10 px-4 py-3 text-xs text-clay">
+                <p>{cleanupResult?.message || "Cleanup failed."}</p>
+                <button
+                  type="button"
+                  className="mt-2 text-[10px] underline"
+                  onClick={() => { setCleanupState("idle"); setCleanupResult(null); }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
-        <div className="rounded-2xl border border-clay/30 bg-clay/10 px-4 py-3 text-sm text-clay">
+        <div className="rounded-2xl border border-clay/30 bg-clay/5 px-4 py-3 text-sm text-clay font-medium">
           {error}
         </div>
       )}
+
+      {/* KPI Cards Grid */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl bg-white/90 p-4 shadow border-b-4 border-leaf flex flex-col justify-between min-h-[90px]">
+          <span className="text-[10px] font-bold text-ink/40 uppercase tracking-wider">Total Sales Volume</span>
+          <span className="text-base sm:text-lg font-bold text-ink mt-2 truncate">
+            {formatCurrency(salesStats.salesTotal)}
+          </span>
+          <span className="text-[10px] text-ink/50 mt-1">Sum of non-cancelled orders</span>
+        </div>
+
+        <div className="rounded-2xl bg-white/90 p-4 shadow border-b-4 border-slatewash flex flex-col justify-between min-h-[90px]">
+          <span className="text-[10px] font-bold text-ink/40 uppercase tracking-wider">Total Orders Count</span>
+          <span className="text-lg sm:text-xl font-bold text-ink mt-2">
+            {salesStats.count} <span className="text-xs font-normal text-ink/55">Invoices</span>
+          </span>
+          <span className="text-[10px] text-ink/50 mt-1">Filtered database records</span>
+        </div>
+
+        <div className="rounded-2xl bg-white/90 p-4 shadow border-b-4 border-clay flex flex-col justify-between min-h-[90px]">
+          <span className="text-[10px] font-bold text-ink/40 uppercase tracking-wider">Pending Deliveries</span>
+          <span className={`text-lg sm:text-xl font-bold mt-2 ${salesStats.pendingCount > 0 ? "text-clay" : "text-leaf"}`}>
+            {salesStats.pendingCount} <span className="text-xs font-normal text-ink/55">Pending</span>
+          </span>
+          <span className="text-[10px] text-ink/50 mt-1">Orders awaiting route dispatch</span>
+        </div>
+
+        <div className="rounded-2xl bg-white/90 p-4 shadow border-b-4 border-amber-400 flex flex-col justify-between min-h-[90px]">
+          <span className="text-[10px] font-bold text-ink/40 uppercase tracking-wider">Return Deductions</span>
+          <span className="text-base sm:text-lg font-bold text-amber-700 mt-2 truncate">
+            {formatCurrency(salesStats.returnsTotal)}
+          </span>
+          <span className="text-[10px] text-ink/50 mt-1">Damaged/resellable returns</span>
+        </div>
+      </div>
+
+      {/* Advanced Auditing Toolbar */}
+      <div className="rounded-2xl bg-white/90 p-5 shadow border border-slatewash/40 space-y-4">
+        <div className="text-xs font-bold text-ink/60 uppercase tracking-wider">Filter Transactions</div>
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-6 items-end">
+          {/* Search bar */}
+          <div className="md:col-span-2 relative">
+            <label className="block text-[10px] font-bold text-ink/50 uppercase mb-1">Search Details</label>
+            <span className="absolute inset-y-0 left-0 pl-3 pt-6 flex items-center pointer-events-none">
+              <svg className="h-4 w-4 text-ink/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </span>
+            <input
+              className="w-full rounded-xl border border-slatewash pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink transition bg-white"
+              placeholder="Order Number, Customer, Rep..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Order Status Selector */}
+          <div>
+            <label className="block text-[10px] font-bold text-ink/50 uppercase mb-1">Order Status</label>
+            <select
+              className="w-full rounded-xl border border-slatewash px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink transition bg-white text-ink/80"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending_delivery">Pending Delivery</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          {/* Payment Status Selector */}
+          <div>
+            <label className="block text-[10px] font-bold text-ink/50 uppercase mb-1">Payment Status</label>
+            <select
+              className="w-full rounded-xl border border-slatewash px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink transition bg-white text-ink/80"
+              value={paymentFilter}
+              onChange={(e) => setPaymentFilter(e.target.value)}
+            >
+              <option value="all">All Payments</option>
+              <option value="not_collected">Not Collected</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="partial">Partial</option>
+              <option value="paid">Paid</option>
+            </select>
+          </div>
+
+          {/* Start Date */}
+          <div>
+            <label className="block text-[10px] font-bold text-ink/50 uppercase mb-1">Start Date</label>
+            <input
+              className="w-full rounded-xl border border-slatewash px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink transition bg-white text-ink/75"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </div>
+
+          {/* End Date */}
+          <div>
+            <label className="block text-[10px] font-bold text-ink/50 uppercase mb-1">End Date</label>
+            <input
+              className="w-full rounded-xl border border-slatewash px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink transition bg-white text-ink/75"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
 
       {loading ? (
         <div className="rounded-2xl bg-white/80 p-6 text-sm text-ink/60 shadow">
@@ -971,7 +1143,7 @@ const SalesHistoryPage = () => {
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
-                        className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold"
+                        className="flex items-center rounded-full border border-ink/15 hover:border-ink hover:bg-slatewash/30 p-2 text-xs font-semibold transition text-ink/70 hover:text-ink"
                         type="button"
                         onClick={() => openView(order)}
                         title="View"
@@ -980,7 +1152,7 @@ const SalesHistoryPage = () => {
                         <IconEye />
                       </button>
                       <button
-                        className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold"
+                        className="flex items-center rounded-full border border-ink/15 hover:border-ink hover:bg-slatewash/30 p-2 text-xs font-semibold transition text-ink/70 hover:text-ink"
                         type="button"
                         onClick={() => handlePrintOrder(order)}
                         title="Print"
@@ -990,26 +1162,30 @@ const SalesHistoryPage = () => {
                       </button>
                       {order.orderStatus === "pending_delivery" && (
                         <>
+                          {role === "rep" && (
+                            <>
+                              <button
+                                className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold hover:border-ink transition"
+                                type="button"
+                                onClick={() => openEdit(order)}
+                                title="Edit order"
+                                aria-label="Edit order"
+                              >
+                                <IconEdit />
+                              </button>
+                              <button
+                                className="flex items-center rounded-full bg-ink p-2 text-xs font-semibold text-sand hover:bg-ink/90 transition shadow-sm"
+                                type="button"
+                                onClick={() => openDeliver(order)}
+                                title="Deliver and collect payment"
+                                aria-label="Deliver and collect payment"
+                              >
+                                <IconTruck />
+                              </button>
+                            </>
+                          )}
                           <button
-                            className="flex items-center rounded-full border border-ink/20 p-2 text-xs font-semibold"
-                            type="button"
-                            onClick={() => openEdit(order)}
-                            title="Edit order"
-                            aria-label="Edit order"
-                          >
-                            <IconEdit />
-                          </button>
-                          <button
-                            className="flex items-center rounded-full bg-ink p-2 text-xs font-semibold text-sand"
-                            type="button"
-                            onClick={() => openDeliver(order)}
-                            title="Deliver and collect payment"
-                            aria-label="Deliver and collect payment"
-                          >
-                            <IconTruck />
-                          </button>
-                          <button
-                            className="flex items-center rounded-full border border-clay/40 p-2 text-xs font-semibold text-clay"
+                            className="flex items-center rounded-full border border-clay/40 p-2 text-xs font-semibold text-clay hover:bg-clay/5 transition"
                             type="button"
                             onClick={() => handleCancelOrder(order)}
                             title="Cancel"
@@ -1021,7 +1197,7 @@ const SalesHistoryPage = () => {
                       )}
                       {order.orderStatus === "cancelled" && (
                         <button
-                          className="flex items-center rounded-full border border-clay/40 p-2 text-xs font-semibold text-clay"
+                          className="flex items-center rounded-full border border-clay/20 hover:border-clay/40 hover:bg-clay/5 p-2 text-xs font-semibold text-clay transition"
                           type="button"
                           onClick={() => handleDeleteOrder(order)}
                           title="Delete"

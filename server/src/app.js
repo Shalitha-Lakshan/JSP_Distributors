@@ -12,6 +12,7 @@ const userRoutes = require("./routes/userRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const tripRoutes = require("./routes/tripRoutes");
+const returnRoutes = require("./routes/returnRoutes");
 const notFound = require("./middleware/notFound");
 const errorHandler = require("./middleware/errorHandler");
 
@@ -59,6 +60,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/trips", tripRoutes);
+app.use("/api/returns", returnRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

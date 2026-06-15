@@ -13,7 +13,8 @@ const emptyForm = {
   currentSellingPrice: "",
   reorderLevel: "",
   isFastMoving: false,
-  status: "active"
+  status: "active",
+  supplier: "Ruhunu Foods"
 };
 
 const formatCurrency = (value) => `Rs. ${Number(value || 0).toLocaleString("en-LK")}`;
@@ -145,7 +146,8 @@ const ProductsPage = () => {
       currentSellingPrice: product.currentSellingPrice,
       reorderLevel: product.reorderLevel || "",
       isFastMoving: product.isFastMoving || false,
-      status: product.status || "active"
+      status: product.status || "active",
+      supplier: product.supplier || "Ruhunu Foods"
     });
     setEditingProductId(product._id);
     setShowProductModal(true);
@@ -536,6 +538,21 @@ const ProductsPage = () => {
                   >
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+
+                {/* Supplier Company */}
+                <div>
+                  <label className="block text-xs font-bold text-ink/60 uppercase">Supplier Company</label>
+                  <select
+                    className="mt-1.5 w-full rounded-xl border border-slatewash px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink transition bg-white"
+                    name="supplier"
+                    value={form.supplier || "Ruhunu Foods"}
+                    onChange={handleChange}
+                    required
+                  >
+                    <option value="Ruhunu Foods">Ruhunu Foods</option>
+                    <option value="Gajamuthu Foods">Gajamuthu Foods</option>
                   </select>
                 </div>
 

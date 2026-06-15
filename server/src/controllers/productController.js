@@ -32,7 +32,8 @@ const createProduct = async (req, res) => {
     currentSellingPrice,
     reorderLevel,
     status,
-    isFastMoving
+    isFastMoving,
+    supplier
   } = req.body;
 
   if (!itemCode || !productName || !variant || !category) {
@@ -70,7 +71,8 @@ const createProduct = async (req, res) => {
     currentSellingPrice: Number(currentSellingPrice),
     reorderLevel: Number(reorderLevel || 0),
     isFastMoving: Boolean(isFastMoving),
-    status: status || "active"
+    status: status || "active",
+    supplier: supplier || "Ruhunu Foods"
   });
 
   return res.status(201).json(product);

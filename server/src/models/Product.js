@@ -20,7 +20,12 @@ const productSchema = new mongoose.Schema(
     totalStock: { type: Number, default: 0, min: 0 },
     reorderLevel: { type: Number, default: 0, min: 0 },
     isFastMoving: { type: Boolean, default: false },
-    status: { type: String, enum: ["active", "inactive"], default: "active" }
+    status: { type: String, enum: ["active", "inactive"], default: "active" },
+    supplier: {
+      type: String,
+      enum: ["Ruhunu Foods", "Gajamuthu Foods"],
+      default: "Ruhunu Foods"
+    }
   },
   { timestamps: true }
 );

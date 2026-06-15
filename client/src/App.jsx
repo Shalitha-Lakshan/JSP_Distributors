@@ -16,6 +16,7 @@ import SalesHistoryPage from "./pages/SalesHistoryPage";
 import InvoicePage from "./pages/InvoicePage";
 import DailyClosingPage from "./pages/DailyClosingPage";
 import ReportsPage from "./pages/ReportsPage";
+import ReturnsPage from "./pages/ReturnsPage";
 import UsersPage from "./pages/UsersPage";
 import TripManagementPage from "./pages/TripManagementPage";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -45,6 +46,14 @@ const App = () => (
       <Route path="/invoices/:invoiceNo" element={<InvoicePage />} />
       <Route path="/reports/daily-closing" element={<DailyClosingPage />} />
       <Route path="/reports" element={<ReportsPage />} />
+      <Route
+        path="/returns"
+        element={
+          <ProtectedRoute allowedRoles={["admin", "manager"]}>
+            <ReturnsPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/trips" element={<TripManagementPage />} />
       <Route
         path="/users"

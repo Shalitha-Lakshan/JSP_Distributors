@@ -13,7 +13,15 @@ if (!MONGO_URI) {
 
 mongoose
   .connect(MONGO_URI)
-  .then(() => {
+  .then(async () => {
+    // Drop lingering unique index invoiceNo_1 on supplierreturns collection if it exists
+    try {
+      await mongoose.connection.db.collection("supplierreturns").dropIndex("invoiceNo_1");
+      console.log("Successfully dropped lingering unique index invoiceNo_1 on supplierreturns.");
+    } catch (err) {
+      // Safe to ignore if index does not exist or was already dropped
+    }
+
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
