@@ -109,47 +109,86 @@ const getCurrentRole = () => {
 const getNavItems = (role) => {
   if (role === "manager") {
     return [
-      { label: "Manager Dashboard",  to: "/dashboard/manager" },
-      { label: "POS Billing",        to: "/pos" },
-      { label: "Trip Sessions",      to: "/trips" },
-      { label: "Products",           to: "/products" },
-      { label: "Stock Add",          to: "/stock/add" },
-      { label: "Stock Batches",      to: "/stock/batches" },
-      { label: "Low Stock",          to: "/products?filter=low-stock" },
-      { label: "Near Expiry",        to: "/stock/batches?filter=near-expiry" },
-      { label: "Customers",          to: "/customers" },
-      { label: "Customer Ledger",    to: "/customers?tab=ledger" },
-      { label: "Payments",           to: "/payments" },
-      { label: "Sales History",      to: "/sales" },
-      { label: "Reports",            to: "/reports" },
-      { label: "Return Reports",     to: "/reports?tab=returns" },
-      { label: "Daily Closing",      to: "/reports/daily-closing" },
+      {
+        section: "Main Operations",
+        items: [
+          { label: "Manager Dashboard",  to: "/dashboard/manager" },
+          { label: "Trip Sessions",      to: "/trips" },
+        ]
+      },
+      {
+        section: "Inventory Control",
+        items: [
+          { label: "Products",           to: "/products" },
+          { label: "Stock Add",          to: "/stock/add" },
+          { label: "Stock Batches",      to: "/stock/batches" },
+        ]
+      },
+      {
+        section: "Finance & Sales",
+        items: [
+          { label: "Customers",          to: "/customers" },
+          { label: "Payments",           to: "/payments" },
+          { label: "Sales History",      to: "/sales" },
+        ]
+      },
+      {
+        section: "Analytics & Closing",
+        items: [
+          { label: "Reports & Returns",  to: "/reports" },
+          { label: "Daily Closing",      to: "/reports/daily-closing" },
+        ]
+      }
     ];
   }
 
   if (role === "admin") {
     return [
-      { label: "Admin Dashboard",    to: "/dashboard/admin" },
-      { label: "POS Billing",        to: "/pos" },
-      { label: "Trip Sessions",      to: "/trips" },
-      { label: "Products",           to: "/products" },
-      { label: "Stock Add",          to: "/stock/add" },
-      { label: "Stock Batches",      to: "/stock/batches" },
-      { label: "Customers",          to: "/customers" },
-      { label: "Payments",           to: "/payments" },
-      { label: "Sales History",      to: "/sales" },
-      { label: "Reports",            to: "/reports" },
-      { label: "Daily Closing",      to: "/reports/daily-closing" },
-      { label: "User Approvals",     to: "/users" },
+      {
+        section: "Main Operations",
+        items: [
+          { label: "Admin Dashboard",    to: "/dashboard/admin" },
+          { label: "Trip Sessions",      to: "/trips" },
+          { label: "User Approvals",     to: "/users" },
+        ]
+      },
+      {
+        section: "Inventory Control",
+        items: [
+          { label: "Products",           to: "/products" },
+          { label: "Stock Add",          to: "/stock/add" },
+          { label: "Stock Batches",      to: "/stock/batches" },
+        ]
+      },
+      {
+        section: "Finance & Sales",
+        items: [
+          { label: "Customers",          to: "/customers" },
+          { label: "Payments",           to: "/payments" },
+          { label: "Sales History",      to: "/sales" },
+        ]
+      },
+      {
+        section: "Analytics & Closing",
+        items: [
+          { label: "Reports",            to: "/reports" },
+          { label: "Daily Closing",      to: "/reports/daily-closing" },
+        ]
+      }
     ];
   }
 
   return [
-    { label: "Create Order",         to: "/pos" },
-    { label: "Sales",                to: "/sales" },
-    { label: "Receive Payment",      to: "/payments" },
-    { label: "My Daily Closing",     to: "/reports/daily-closing" },
-    { label: "Trip Sessions",        to: "/trips" },
+    {
+      section: "Sales Representative",
+      items: [
+        { label: "Create Order",         to: "/pos" },
+        { label: "Sales",                to: "/sales" },
+        { label: "Receive Payment",      to: "/payments" },
+        { label: "My Daily Closing",     to: "/reports/daily-closing" },
+        { label: "Trip Sessions",        to: "/trips" },
+      ]
+    }
   ];
 };
 
@@ -222,42 +261,51 @@ const Sidebar = ({ collapsed, onToggle }) => {
       </div>
 
       {/* ── Nav items ──────────────────────────────────────────── */}
-      <nav className="flex flex-col gap-1 px-2 py-4 flex-1 overflow-y-auto overflow-x-hidden">
-        {getNavItems(getCurrentRole()).map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            title={collapsed ? item.label : undefined}
-            className={({ isActive }) =>
-              `group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition
-              ${isActive
-                ? "bg-clay text-white"
-                : "text-sand/80 hover:bg-white/10 hover:text-sand"
-              }`
-            }
-          >
-            {/* icon */}
-            <span className="shrink-0">{iconFor(item.to)}</span>
-
-            {/* label – fades out when collapsed */}
+      <nav className="flex flex-col gap-4 px-2 py-4 flex-1 overflow-y-auto overflow-x-hidden">
+        {getNavItems(getCurrentRole()).map((group, idx) => (
+          <div key={idx} className="space-y-1">
             {!collapsed && (
-              <span className="whitespace-nowrap overflow-hidden text-ellipsis">
-                {item.label}
-              </span>
+              <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-sand/40 mb-1">
+                {group.section}
+              </div>
             )}
+            {group.items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                title={collapsed ? item.label : undefined}
+                className={({ isActive }) =>
+                  `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition
+                  ${isActive
+                    ? "bg-clay text-white"
+                    : "text-sand/80 hover:bg-white/10 hover:text-sand"
+                  }`
+                }
+              >
+                {/* icon */}
+                <span className="shrink-0">{iconFor(item.to)}</span>
 
-            {/* tooltip when collapsed */}
-            {collapsed && (
-              <span className="
-                pointer-events-none absolute left-full ml-3 z-50
-                rounded-lg bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-white
-                opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap
-                shadow-xl
-              ">
-                {item.label}
-              </span>
-            )}
-          </NavLink>
+                {/* label – fades out when collapsed */}
+                {!collapsed && (
+                  <span className="whitespace-nowrap overflow-hidden text-ellipsis">
+                    {item.label}
+                  </span>
+                )}
+
+                {/* tooltip when collapsed */}
+                {collapsed && (
+                  <span className="
+                    pointer-events-none absolute left-full ml-3 z-50
+                    rounded-lg bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-white
+                    opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap
+                    shadow-xl
+                  ">
+                    {item.label}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
 
