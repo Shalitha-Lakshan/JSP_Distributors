@@ -126,9 +126,11 @@ const ManagerDashboardPage = () => {
   // Operational secondary margins and valuations
   const secondaryStats = useMemo(() => {
     if (!dashboard) return {};
+    const totalSales = dashboard.totalSalesValue || 0;
     return {
-      profit: dashboard.profitToday || 0,
-      margin: dashboard.profitMarginToday || 0,
+      // Flat 18% margin on total sales as per policy
+      profit: totalSales * 0.18,
+      margin: 18,
       returns: dashboard.returnsAdjustedToday || 0,
       returnRatio: dashboard.returnSalesRatio || 0,
       lowStock: dashboard.lowStockCount || 0,
