@@ -24,12 +24,32 @@ const orderItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const returnItemSchema = new mongoose.Schema(
+  {
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    itemCode: { type: String, required: true },
+    itemName: { type: String, required: true },
+    quantity: { type: Number, required: true, min: 0 },
+    returnPrice: { type: Number, required: true, min: 0 },
+    returnTotal: { type: Number, required: true, min: 0 },
+    condition: {
+      type: String,
+      enum: ["resellable", "damaged", "expired"],
+      default: "resellable"
+    },
+    originalInvoiceNo: { type: String, trim: true },
+    reason: { type: String, trim: true }
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     orderNo: { type: String, required: true, unique: true },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", default: null },
     cashier: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     items: { type: [orderItemSchema], default: [] },
+    returns: { type: [returnItemSchema], default: [] },
     orderTotal: { type: Number, required: true, min: 0 },
     returnTotal: { type: Number, default: 0, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
@@ -44,6 +64,11 @@ const orderSchema = new mongoose.Schema(
     paymentStatus: {
       type: String,
       enum: ["not_collected", "paid", "partial", "credit"],
+      default: "not_collected"
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["cash", "credit", "cheque", "not_collected"],
       default: "not_collected"
     },
     stockReserved: { type: Boolean, default: false },

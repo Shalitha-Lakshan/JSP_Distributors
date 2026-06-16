@@ -5,6 +5,7 @@ const StockBatch = require("../models/StockBatch");
 const Payment = require("../models/Payment");
 const TripSession = require("../models/TripSession");
 const { createSaleFromPayload } = require("../services/salesService");
+const Counter = require("../models/Counter");
 
 const reserveStockForItems = async (items) => {
   const orderItems = [];
@@ -168,8 +169,16 @@ const createOrder = async (req, res) => {
       );
     }
 
+    const counter = await Counter.findOneAndUpdate(
+      { id: "orderNo" },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    );
+    const orderSeq = String(counter.seq).padStart(8, "0");
+    const orderNo = `ORD-${orderSeq}`;
+
     const order = await Order.create({
-      orderNo: `ORD-${Date.now()}`,
+      orderNo,
       customer: customer || null,
       cashier: req.user?._id,
       items: orderItems,
@@ -215,16 +224,22 @@ const listOrders = async (req, res) => {
   }
 
   const orders = await Order.find(filter)
-    .populate("customer", "name")
+    .populate("customer", "name phone address customerType")
     .populate("cashier", "name")
+    .populate("tripId", "route")
+    .populate({ path: "items.productId", select: "supplier" })
+    .populate("saleId", "paymentMethod")
     .sort({ createdAt: -1 });
   return res.json(orders);
 };
 
 const getOrder = async (req, res) => {
   const order = await Order.findById(req.params.id)
-    .populate("customer", "name")
-    .populate("cashier", "name");
+    .populate("customer", "name phone address customerType")
+    .populate("cashier", "name")
+    .populate("tripId", "route")
+    .populate({ path: "items.productId", select: "supplier" })
+    .populate("saleId", "paymentMethod");
 
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
@@ -234,7 +249,7 @@ const getOrder = async (req, res) => {
 };
 
 const updateOrder = async (req, res) => {
-  const { items = [], customer } = req.body;
+  const { items = [], customer, discount, returns } = req.body;
   const order = await Order.findById(req.params.id);
 
   if (!order) {
@@ -248,6 +263,20 @@ const updateOrder = async (req, res) => {
   if (customer) {
     order.customer = customer;
   }
+
+  const discountVal = discount !== undefined ? Number(discount || 0) : order.discount || 0;
+  
+  let returnTotalVal = order.returnTotal || 0;
+  if (returns !== undefined) {
+    order.returns = returns;
+    returnTotalVal = returns.reduce(
+      (sum, item) => sum + (item.returnTotal || item.quantity * item.returnPrice || 0),
+      0
+    );
+  }
+
+  order.discount = discountVal;
+  order.returnTotal = returnTotalVal;
 
   if (items.length > 0) {
     try {
@@ -274,13 +303,14 @@ const updateOrder = async (req, res) => {
 
       order.items = orderItems;
       order.orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
-      order.netTotal = order.orderTotal;
-      order.dueAmount = order.orderTotal;
       order.stockReserved = true;
     } catch (err) {
       return res.status(400).json({ message: err.message || "Failed to update order" });
     }
   }
+
+  order.netTotal = Math.max(order.orderTotal - order.returnTotal - order.discount, 0);
+  order.dueAmount = order.netTotal;
 
   await order.save();
   return res.json(order);
@@ -484,6 +514,7 @@ const deliverOrder = async (req, res) => {
 
     order.orderStatus = "delivered";
     order.paymentStatus = sale.paymentStatus;
+    order.paymentMethod = resolvedPaymentMethod;
     order.deliveryDate = new Date();
     order.saleId = sale._id;
     order.orderTotal = sale.orderTotal;

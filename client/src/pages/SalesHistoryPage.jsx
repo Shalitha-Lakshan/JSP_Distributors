@@ -86,6 +86,8 @@ const SalesHistoryPage = () => {
   const [returns, setReturns] = useState([]);
   const [returnForm, setReturnForm] = useState({
     productId: "",
+    itemCode: "",
+    itemName: "",
     quantity: "",
     returnPrice: "",
     condition: "resellable",
@@ -296,6 +298,8 @@ const SalesHistoryPage = () => {
     setReturns([]);
     setReturnForm({
       productId: "",
+      itemCode: "",
+      itemName: "",
       quantity: "",
       returnPrice: "",
       condition: "resellable",
@@ -307,6 +311,7 @@ const SalesHistoryPage = () => {
     setPaymentMethod("cash");
     setPaidAmount(0);
     setDiscountPercent(0);
+    setError("");
   };
 
   const openView = (order) => {
@@ -328,7 +333,7 @@ const SalesHistoryPage = () => {
       quantity: ""
     });
     setEditItems(order.items.map((item) => ({
-      productId: item.productId,
+      productId: item.productId?._id || item.productId,
       itemCode: item.itemCode,
       itemName: item.itemName,
       quantity: item.quantity,
@@ -336,13 +341,31 @@ const SalesHistoryPage = () => {
       lineTotal: item.lineTotal,
       usedBatches: item.usedBatches || []
     })));
+    // Initialize returns list and discountPercent from order history details
+    const orderReturns = order.returns || [];
+    setReturns(orderReturns.map((r) => ({
+      productId: r.productId?._id || r.productId,
+      itemCode: r.itemCode,
+      itemName: r.itemName,
+      quantity: r.quantity,
+      returnPrice: r.returnPrice,
+      returnTotal: r.returnTotal || (r.quantity * r.returnPrice),
+      condition: r.condition,
+      originalInvoiceNo: r.originalInvoiceNo || "",
+      reason: r.reason || ""
+    })));
+    setHasReturns(orderReturns.length > 0);
+
+    const grossTotal = order.orderTotal || 0;
+    const discountTotal = order.discount || 0;
+    setDiscountPercent(grossTotal > 0 ? Math.round((discountTotal / grossTotal) * 100) : 0);
   };
 
   const openDeliver = (order) => {
     setSelectedOrder(order);
     setMode("deliver");
     setDeliveryItems(order.items.map((item) => ({
-      productId: item.productId,
+      productId: item.productId?._id || item.productId,
       itemCode: item.itemCode,
       itemName: item.itemName,
       quantity: item.quantity,
@@ -406,6 +429,11 @@ const SalesHistoryPage = () => {
         return;
       }
 
+      if (returnForm.productId && query === `${returnForm.itemCode} - ${returnForm.itemName}`) {
+        setReturnSuggestions([]);
+        return;
+      }
+
       try {
         const { data } = await api.get("/api/products/search", {
           headers: authHeader,
@@ -418,12 +446,17 @@ const SalesHistoryPage = () => {
     };
 
     runSearch();
-  }, [returnSearch]);
+  }, [returnSearch, returnForm.productId, returnForm.itemCode, returnForm.itemName]);
 
   useEffect(() => {
     const runEditSearch = async () => {
       const query = editSearch.trim();
       if (!query) {
+        setEditSuggestions([]);
+        return;
+      }
+
+      if (editForm.productId && query === `${editForm.itemCode} - ${editForm.itemName}`) {
         setEditSuggestions([]);
         return;
       }
@@ -440,12 +473,14 @@ const SalesHistoryPage = () => {
     };
 
     runEditSearch();
-  }, [editSearch]);
+  }, [editSearch, editForm.productId, editForm.itemCode, editForm.itemName]);
 
   const handleSelectReturnProduct = (product) => {
     setReturnForm((prev) => ({
       ...prev,
-      productId: product._id
+      productId: product._id,
+      itemCode: product.itemCode,
+      itemName: product.displayName
     }));
     setReturnSearch(`${product.itemCode} - ${product.displayName}`);
     setReturnSuggestions([]);
@@ -567,6 +602,8 @@ const SalesHistoryPage = () => {
 
     setReturnForm({
       productId: "",
+      itemCode: "",
+      itemName: "",
       quantity: "",
       returnPrice: "",
       condition: "resellable",
@@ -625,37 +662,105 @@ const SalesHistoryPage = () => {
       return;
     }
 
-    const itemsRows = (order.items || [])
-      .map(
-        (item) => `
-          <tr>
-            <td>${item.itemName || "-"}</td>
-            <td style="text-align:right;">${formatCurrency(item.unitPrice)}</td>
-            <td style="text-align:right;">${item.quantity || 0}</td>
-            <td style="text-align:right;">${formatCurrency(item.lineTotal)}</td>
-          </tr>
-        `
-      )
-      .join("");
-
     const logoUrl = `${window.location.origin}/logo.png`;
     const customerName = order.customer?.name || "Walk-in";
-    const paymentStatus = order.paymentStatus?.replace("_", " ") || "-";
-    const orderStatus = order.orderStatus?.replace("_", " ") || "-";
+    const customerAddress = order.customer?.address || "-";
+    const customerPhone = order.customer?.phone || "-";
+    const routeLabel = order.tripId?.route || "-";
+    const actualPaymentMethod = order.paymentMethod && order.paymentMethod !== "not_collected"
+      ? order.paymentMethod
+      : (order.saleId?.paymentMethod || (order.paymentStatus === "credit" ? "credit" : "cash"));
+
     const grossTotal = Number(order.orderTotal || 0);
     const returnTotal = Number(order.returnTotal || 0);
     const discountTotal = Number(order.discount || 0);
-    const netTotal = Math.max(grossTotal - returnTotal - discountTotal, 0);
+    const grossAfterDiscount = Math.max(grossTotal - discountTotal, 0);
+    const netTotal = Math.max(grossAfterDiscount - returnTotal, 0);
     const paidTotal = Number(order.paidAmount || 0);
     const dueTotal = Math.max(netTotal - paidTotal, 0);
-    const paymentMethodLabel = order.paymentMethod
-      ? order.paymentMethod === "credit"
-        ? "Credit Bill"
-        : order.paymentMethod === "cheque"
-          ? "Cheque"
-          : "Cash"
-      : "-";
-    const paidLabel = order.paymentMethod === "credit" ? "Credit Bill Amount" : "Paid Amount";
+
+    const discountPercentVal = grossTotal > 0 ? Math.round((discountTotal / grossTotal) * 100) : 0;
+
+    const getRsCts = (val) => {
+      const rs = Math.floor(val || 0);
+      const ctsVal = Math.round(((val || 0) - rs) * 100);
+      const cts = String(ctsVal).padStart(2, "0");
+      return { rs: rs.toLocaleString("en-LK"), cts };
+    };
+
+    const grossTotalRsCts = getRsCts(grossTotal);
+    const discountTotalRsCts = getRsCts(discountTotal);
+    const grossAfterDiscountRsCts = getRsCts(grossAfterDiscount);
+    const returnTotalRsCts = getRsCts(returnTotal);
+    const netTotalRsCts = getRsCts(netTotal);
+    const paidTotalRsCts = getRsCts(paidTotal);
+    const dueTotalRsCts = getRsCts(dueTotal);
+
+    const printRows = [];
+    (order.items || []).forEach((item) => {
+      if (item.usedBatches && item.usedBatches.length > 0) {
+        item.usedBatches.forEach((batch) => {
+          printRows.push({
+            itemName: item.itemName,
+            unitPrice: batch.billingPrice,
+            quantity: batch.qty,
+            lineTotal: batch.lineTotal
+          });
+        });
+      } else {
+        printRows.push({
+          itemName: item.itemName,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          lineTotal: item.lineTotal
+        });
+      }
+    });
+
+    const itemsRows = printRows.map((row) => {
+      const rate = getRsCts(row.unitPrice);
+      const amount = getRsCts(row.lineTotal);
+      return `
+        <tr>
+          <td style="padding: 6px 8px; border: 1px solid #000; font-weight: bold; color: #000;">
+            ${row.itemName || "-"}
+          </td>
+          <td style="padding: 6px 8px; border: 1px solid #000; text-align: right; font-family: monospace; font-weight: bold;">
+            ${rate.rs}
+          </td>
+          <td style="padding: 6px 8px; border: 1px solid #000; text-align: center; font-family: monospace; font-weight: bold;">
+            ${rate.cts}
+          </td>
+          <td style="padding: 6px 8px; border: 1px solid #000; text-align: center; font-weight: bold;">
+            ${row.quantity || 0}
+          </td>
+          <td style="padding: 6px 8px; border: 1px solid #000; text-align: right; font-family: monospace; font-weight: bold;">
+            ${amount.rs}
+          </td>
+          <td style="padding: 6px 8px; border: 1px solid #000; text-align: center; font-family: monospace; font-weight: bold;">
+            ${amount.cts}
+          </td>
+        </tr>
+      `;
+    });
+
+    const minRows = 12;
+    if (itemsRows.length < minRows) {
+      const emptyCount = minRows - itemsRows.length;
+      for (let i = 0; i < emptyCount; i++) {
+        itemsRows.push(`
+          <tr>
+            <td style="padding: 6px 8px; border: 1px solid #000; height: 26px;">&nbsp;</td>
+            <td style="padding: 6px 8px; border: 1px solid #000; height: 26px;">&nbsp;</td>
+            <td style="padding: 6px 8px; border: 1px solid #000; height: 26px;">&nbsp;</td>
+            <td style="padding: 6px 8px; border: 1px solid #000; height: 26px;">&nbsp;</td>
+            <td style="padding: 6px 8px; border: 1px solid #000; height: 26px;">&nbsp;</td>
+            <td style="padding: 6px 8px; border: 1px solid #000; height: 26px;">&nbsp;</td>
+          </tr>
+        `);
+      }
+    }
+    const itemsRowsHtml = itemsRows.join("");
 
     const html = `
       <!DOCTYPE html>
@@ -664,114 +769,307 @@ const SalesHistoryPage = () => {
           <title>Order ${order.orderNo}</title>
           <style>
             * { box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; color: #111827; padding: 28px 32px; }
-            .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-            .brand { display: flex; align-items: center; gap: 12px; }
-            .brand img { height: 44px; width: 44px; }
-            .brand h1 { margin: 0; font-size: 20px; letter-spacing: 0.5px; }
-            .brand .meta { font-size: 12px; color: #374151; margin-top: 2px; }
-            .invoice-block { text-align: right; font-size: 12px; }
-            .invoice-block strong { display: block; font-size: 12px; letter-spacing: 0.5px; }
-            .divider { height: 1px; background: #e5e7eb; margin: 14px 0; }
-            .muted { color: #6b7280; font-size: 11px; }
-            .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-            .box { border: 1px solid #e5e7eb; padding: 10px 12px; border-radius: 6px; }
-            .box strong { font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-            th, td { border: 1px solid #e5e7eb; padding: 8px; font-size: 12px; }
-            th { text-align: left; background: #f8fafc; color: #6b7280; font-weight: 700; letter-spacing: 0.4px; }
-            .summary-card { margin-top: 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
-            .summary-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
-            .summary-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #e5e7eb; }
-            .summary-row:last-child { border-bottom: none; }
-            .summary-label { font-weight: 700; }
-            .summary-strong { font-size: 16px; font-weight: 800; }
-            .summary-negative { color: #b91c1c; }
-            .summary-due { color: #b91c1c; font-weight: 800; }
-            .summary-divider { height: 1px; background: #d1d5db; margin: 10px 0; }
-            .signatures { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 32px; }
-            .signature-line { border-top: 1px dotted #6b7280; padding-top: 6px; font-size: 11px; text-align: center; }
-            @media print { body { padding: 0; } }
+            body {
+              font-family: system-ui, -apple-system, sans-serif;
+              color: #000;
+              padding: 20px;
+              margin: 0;
+              background: #ffffff;
+            }
+            .invoice-card {
+              max-width: 800px;
+              margin: 0 auto;
+              border: 2px solid #000;
+              padding: 20px;
+              position: relative;
+            }
+            .header-sec {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 15px;
+            }
+            .brand-block {
+              display: flex;
+              align-items: center;
+            }
+            .logo-oval {
+              width: 95px;
+              height: 44px;
+              background-color: #0c4a6e;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: #ffffff;
+              font-weight: 800;
+              font-size: 15px;
+              border: 2px solid #000;
+              box-shadow: inset 0 0 4px rgba(255, 255, 255, 0.4);
+              margin-right: 12px;
+            }
+            .title-text {
+              font-size: 19px;
+              font-weight: 900;
+              color: #0c4a6e;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+            }
+            .meta-box {
+              border: 1.5px solid #000;
+              width: 280px;
+              font-size: 11px;
+            }
+            .meta-row {
+              display: flex;
+              border-bottom: 1px solid #000;
+            }
+            .meta-row:last-child {
+              border-bottom: none;
+            }
+            .meta-label {
+              width: 40%;
+              padding: 4px 6px;
+              font-weight: bold;
+              border-right: 1px solid #000;
+              background-color: #f1f5f9;
+            }
+            .meta-value {
+              width: 60%;
+              padding: 4px 6px;
+              font-weight: bold;
+            }
+            .customer-box {
+              border: 1.5px solid #000;
+              padding: 8px;
+              margin-bottom: 15px;
+              font-size: 11px;
+            }
+            .customer-title {
+              font-weight: 800;
+              text-transform: uppercase;
+              color: #0c4a6e;
+              margin-bottom: 6px;
+              font-size: 11px;
+            }
+            .customer-line {
+              display: flex;
+              margin-bottom: 3px;
+              font-weight: bold;
+            }
+            .customer-label {
+              width: 65px;
+              color: #475569;
+            }
+            .customer-val {
+              color: #000;
+            }
+            table.items-table {
+              width: 100%;
+              border-collapse: collapse;
+              border: 1.5px solid #000;
+            }
+            table.items-table th, table.items-table td {
+              border: 1px solid #000;
+              padding: 6px 8px;
+              font-size: 11px;
+              vertical-align: middle;
+            }
+            table.items-table th {
+              background-color: #f1f5f9;
+              font-weight: bold;
+              text-transform: uppercase;
+              text-align: center;
+            }
+            @media print {
+              body { padding: 0; }
+              .invoice-card { border: 2px solid #000; }
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div class="brand">
-              <img src="${logoUrl}" alt="Logo" />
-              <div>
-                <h1>JSP DISTRIBUTORS</h1>
-                <div class="meta">130/B, Padavi - parackramapura</div>
-                <div class="meta">070 - 4407191</div>
+          <div class="invoice-card">
+            <div class="header-sec">
+              <div class="brand-block">
+                <img src="${logoUrl}" alt="JSP Logo" style="height: 48px; object-fit: contain; margin-right: 12px;" />
+                <div style="display: flex; flex-direction: column;">
+                  <div class="title-text">REDISTRIBUTOR SALES INVOICE</div>
+                  <div style="font-size: 11px; font-weight: bold; color: #000; margin-top: 1px;">JSP DISTRIBUTORS</div>
+                </div>
+              </div>
+              
+              <div class="meta-box">
+                <div style="border-bottom: 1.5px solid #000; padding: 5px 6px; font-weight: 800; font-size: 12px; background-color: #f1f5f9; display: flex; justify-content: space-between;">
+                  <span>Invoice No :-</span>
+                  <span style="font-family: monospace; color: #b91c1c;">${order.orderNo}</span>
+                </div>
+                <div class="meta-row">
+                  <div class="meta-label">Date</div>
+                  <div class="meta-value">${formatDate(order.createdAt)}</div>
+                </div>
+                <div class="meta-row">
+                  <div class="meta-label">Area</div>
+                  <div class="meta-value">${routeLabel}</div>
+                </div>
+                <div class="meta-row">
+                  <div class="meta-label">Distributor</div>
+                  <div class="meta-value">JSP DISTRIBUTORS</div>
+                </div>
               </div>
             </div>
-            <div class="invoice-block">
-              <strong>INVOICE #</strong>
-              <div>${order.orderNo}</div>
+
+            <div class="customer-box">
+              <div class="customer-title">Name & Address of the Customer :-</div>
+              <div class="customer-line">
+                <span class="customer-label">Name:</span>
+                <span class="customer-val">${customerName}</span>
+              </div>
+              <div class="customer-line">
+                <span class="customer-label">Address:</span>
+                <span class="customer-val">${customerAddress}</span>
+              </div>
+              <div class="customer-line">
+                <span class="customer-label">Phone:</span>
+                <span class="customer-val">${customerPhone}</span>
+              </div>
             </div>
-          </div>
 
-          <div class="divider"></div>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th rowspan="2" style="width: 50%; text-align: left;">Product Range</th>
+                  <th colspan="2" style="width: 20%;">Rate</th>
+                  <th rowspan="2" style="width: 10%;">Qty.</th>
+                  <th colspan="2" style="width: 20%;">Amount</th>
+                </tr>
+                <tr>
+                  <th style="border-top: 1px solid #000; width: 13%;">Rs.</th>
+                  <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 7%;">Cts.</th>
+                  <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 13%;">Rs.</th>
+                  <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 7%;">Cts.</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsRowsHtml || `
+                  <tr>
+                    <td colspan="6" style="text-align: center; color: #475569; padding: 14px;">No items fulfilled</td>
+                  </tr>
+                `}
+              </tbody>
+            </table>
 
-          <div class="grid">
-            <div class="box">
-              <div class="muted">Date</div>
-              <strong>${formatDate(order.createdAt)}</strong>
-              <div class="muted" style="margin-top:6px;">Time</div>
-              <strong>${formatDateTime(order.createdAt)}</strong>
-            </div>
-            <div class="box">
-              <div class="muted">Bill To</div>
-              <strong>${customerName}</strong>
-              <div class="muted" style="margin-top:6px;">Payment</div>
-              <strong>${paymentStatus}</strong>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th style="width:46%;">ITEM DESCRIPTION</th>
-                <th style="width:18%; text-align:right;">PRICE</th>
-                <th style="width:12%; text-align:right;">QTY</th>
-                <th style="width:24%; text-align:right;">AMOUNT</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsRows || "<tr><td colspan=\"4\" class=\"muted\">No items</td></tr>"}
-            </tbody>
-          </table>
-
-          <div class="summary-card">
-            <div class="summary-title">Order Summary</div>
-            <div class="summary-row"><span class="summary-label">Gross Order Total</span><span>${formatCurrency(grossTotal)}</span></div>
-            <div class="summary-row"><span class="summary-label">Return Deductions</span><span class="summary-negative">-${formatCurrency(returnTotal)}</span></div>
-            <div class="summary-row"><span class="summary-label">Discount</span><span class="summary-negative">-${formatCurrency(discountTotal)}</span></div>
-            <div class="summary-divider"></div>
-            <div class="summary-row"><span class="summary-label">Net Payable</span><span class="summary-strong">${formatCurrency(netTotal)}</span></div>
-
-            <div class="summary-title" style="margin-top:10px;">Payment Summary</div>
-            <div class="summary-row"><span class="summary-label">Payment Method</span><span>${paymentMethodLabel}</span></div>
-            <div class="summary-row"><span class="summary-label">${paidLabel}</span><span>${formatCurrency(paidTotal)}</span></div>
-            <div class="summary-row"><span class="summary-label">Due Amount</span><span class="${dueTotal > 0 ? "summary-due" : ""}">${formatCurrency(dueTotal)}</span></div>
-          </div>
-
-          ${
-            order.paymentMethod === "cheque"
-              ? `
-                <div class="summary-card" style="margin-top:12px;">
-                  <div class="summary-title">Cheque Details</div>
-                  <div class="summary-row"><span class="summary-label">Cheque No</span><span>-</span></div>
-                  <div class="summary-row"><span class="summary-label">Bank Name</span><span>-</span></div>
-                  <div class="summary-row"><span class="summary-label">Cheque Date</span><span>-</span></div>
-                  <div class="summary-row"><span class="summary-label">Cheque Status</span><span>-</span></div>
+            <div style="display: flex; border: 1.5px solid #000; border-top: none; width: 100%; font-size: 11px;">
+              <!-- Left Side: Payment Details -->
+              <div style="width: 50%; border-right: 1.5px solid #000; padding: 8px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                  <div style="font-weight: 800; text-transform: uppercase; color: #0c4a6e; margin-bottom: 8px; border-bottom: 1px solid #000; padding-bottom: 2px;">Mode of Payment</div>
+                  
+                  <div style="display: flex; gap: 20px; margin-bottom: 12px; font-weight: bold;">
+                    <div style="display: flex; align-items: center;">
+                      <span style="border: 1px solid #000; display: inline-block; width: 14px; height: 14px; line-height: 12px; text-align: center; font-size: 10px; margin-right: 6px; font-family: monospace;">
+                        ${actualPaymentMethod === "cash" ? "✓" : "&nbsp;"}
+                      </span>
+                      Cash
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                      <span style="border: 1px solid #000; display: inline-block; width: 14px; height: 14px; line-height: 12px; text-align: center; font-size: 10px; margin-right: 6px; font-family: monospace;">
+                        ${actualPaymentMethod === "credit" ? "✓" : "&nbsp;"}
+                      </span>
+                      Credit
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                      <span style="border: 1px solid #000; display: inline-block; width: 14px; height: 14px; line-height: 12px; text-align: center; font-size: 10px; margin-right: 6px; font-family: monospace;">
+                        ${actualPaymentMethod === "cheque" ? "✓" : "&nbsp;"}
+                      </span>
+                      Cheque
+                    </div>
+                  </div>
+                  
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; align-items: center;">
+                      <span style="font-weight: bold; width: 80px; color: #475569;">Bank:</span>
+                      <span style="border-bottom: 1px dotted #000; flex-grow: 1; padding-bottom: 2px; font-weight: bold;">
+                        ${actualPaymentMethod === "cheque" ? (order.chequeBank || "-") : ""}
+                      </span>
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                      <span style="font-weight: bold; width: 80px; color: #475569;">Cheque No:</span>
+                      <span style="border-bottom: 1px dotted #000; flex-grow: 1; padding-bottom: 2px; font-family: monospace; font-weight: bold;">
+                        ${actualPaymentMethod === "cheque" ? (order.chequeNo || "-") : ""}
+                      </span>
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                      <span style="font-weight: bold; width: 80px; color: #475569;">Date:</span>
+                      <span style="border-bottom: 1px dotted #000; flex-grow: 1; padding-bottom: 2px; font-weight: bold;">
+                        ${actualPaymentMethod === "cheque" && order.chequeDate ? formatDate(order.chequeDate) : ""}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              `
-              : ""
-          }
+              </div>
 
-          <div class="signatures">
-            <div class="signature-line">Signature of Customer</div>
-            <div class="signature-line">Signature of Rep</div>
+              <!-- Right Side: Totals -->
+              <div style="width: 50%;">
+                <table style="width: 100%; border-collapse: collapse; height: 100%; font-size: 11px;">
+                  <tbody>
+                    <tr style="border-bottom: 1px solid #000;">
+                      <td style="width: 60%; padding: 5px 8px; font-weight: bold; color: #475569; border-right: 1px solid #000; background-color: #f8fafc;">Total</td>
+                      <td style="width: 26%; padding: 5px 8px; text-align: right; font-family: monospace; font-weight: bold; border-right: 1px solid #000;">${grossTotalRsCts.rs}</td>
+                      <td style="width: 14%; padding: 5px 8px; text-align: center; font-family: monospace; font-weight: bold;">${grossTotalRsCts.cts}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #000;">
+                      <td style="width: 60%; padding: 5px 8px; font-weight: bold; color: #475569; border-right: 1px solid #000; background-color: #f8fafc;">Less Discount: ${discountPercentVal}%</td>
+                      <td style="width: 26%; padding: 5px 8px; text-align: right; font-family: monospace; font-weight: bold; border-right: 1px solid #000; color: #b91c1c;">${discountTotalRsCts.rs}</td>
+                      <td style="width: 14%; padding: 5px 8px; text-align: center; font-family: monospace; font-weight: bold; color: #b91c1c;">${discountTotalRsCts.cts}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #000;">
+                      <td style="width: 60%; padding: 5px 8px; font-weight: bold; color: #475569; border-right: 1px solid #000; background-color: #f8fafc;">Gross Total</td>
+                      <td style="width: 26%; padding: 5px 8px; text-align: right; font-family: monospace; font-weight: bold; border-right: 1px solid #000;">${grossAfterDiscountRsCts.rs}</td>
+                      <td style="width: 14%; padding: 5px 8px; text-align: center; font-family: monospace; font-weight: bold;">${grossAfterDiscountRsCts.cts}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #000;">
+                      <td style="width: 60%; padding: 5px 8px; font-weight: bold; color: #475569; border-right: 1px solid #000; background-color: #f8fafc;">Market Returns</td>
+                      <td style="width: 26%; padding: 5px 8px; text-align: right; font-family: monospace; font-weight: bold; border-right: 1px solid #000; color: #b91c1c;">${returnTotalRsCts.rs}</td>
+                      <td style="width: 14%; padding: 5px 8px; text-align: center; font-family: monospace; font-weight: bold; color: #b91c1c;">${returnTotalRsCts.cts}</td>
+                    </tr>
+                    <tr style="background-color: #f1f5f9; ${order.orderStatus === "delivered" ? "border-bottom: 1px solid #000;" : ""}">
+                      <td style="width: 60%; padding: 6px 8px; font-weight: 800; color: #0c4a6e; border-right: 1px solid #000; text-transform: uppercase;">Grand Total</td>
+                      <td style="width: 26%; padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 900; border-right: 1px solid #000; color: #0c4a6e; font-size: 12px;">${netTotalRsCts.rs}</td>
+                      <td style="width: 14%; padding: 6px 8px; text-align: center; font-family: monospace; font-weight: 900; color: #0c4a6e; font-size: 12px;">${netTotalRsCts.cts}</td>
+                    </tr>
+                    ${order.orderStatus === "delivered" ? `
+                    <tr style="border-bottom: 1px solid #000;">
+                      <td style="width: 60%; padding: 5px 8px; font-weight: bold; color: #475569; border-right: 1px solid #000; background-color: #f8fafc;">Paid Amount</td>
+                      <td style="width: 26%; padding: 5px 8px; text-align: right; font-family: monospace; font-weight: bold; border-right: 1px solid #000;">${paidTotalRsCts.rs}</td>
+                      <td style="width: 14%; padding: 5px 8px; text-align: center; font-family: monospace; font-weight: bold;">${paidTotalRsCts.cts}</td>
+                    </tr>
+                    <tr style="background-color: #fef2f2;">
+                      <td style="width: 60%; padding: 6px 8px; font-weight: 800; color: #b91c1c; border-right: 1px solid #000; text-transform: uppercase;">Due Balance</td>
+                      <td style="width: 26%; padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 900; border-right: 1px solid #000; color: #b91c1c; font-size: 12px;">${dueTotalRsCts.rs}</td>
+                      <td style="width: 14%; padding: 6px 8px; text-align: center; font-family: monospace; font-weight: 900; color: #b91c1c; font-size: 12px;">${dueTotalRsCts.cts}</td>
+                    </tr>
+                    ` : ""}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; margin-top: 55px; padding: 0 10px; font-size: 11px;">
+              <div style="text-align: center; width: 250px;">
+                <div style="border-top: 1px dotted #000; margin-bottom: 4px;"></div>
+                <div style="font-weight: bold;">Name & Signature of Customer</div>
+              </div>
+              <div style="text-align: center; width: 250px;">
+                <div style="border-top: 1px dotted #000; margin-bottom: 4px;"></div>
+                <div style="font-weight: bold;">Name & Signature of Rep</div>
+              </div>
+            </div>
+
+            <div style="margin-top: 35px; padding-top: 10px; border-top: 1px solid #000; font-size: 9px; color: #475569; line-height: 1.4;">
+              <strong style="color: #0f172a; text-transform: uppercase;">JSP DISTRIBUTORS</strong><br/>
+              130/B, Padavi - Parackramapura<br/>
+              Tel: 0767761382 | Email: dilshanrajitha201@gmail.com
+            </div>
           </div>
         </body>
       </html>
@@ -789,6 +1087,16 @@ const SalesHistoryPage = () => {
       return;
     }
 
+    const orderTotal = editItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    const returnTotal = hasReturns ? returns.reduce((sum, item) => sum + item.returnTotal, 0) : 0;
+    const baseTotal = Math.max(orderTotal - returnTotal, 0);
+    const discountAmount = Math.max((baseTotal * Number(discountPercent || 0)) / 100, 0);
+
+    if (hasReturns && returnTotal > orderTotal) {
+      setError("Return total cannot exceed order total.");
+      return;
+    }
+
     setSaving(true);
     try {
       await api.put(
@@ -798,7 +1106,9 @@ const SalesHistoryPage = () => {
             productId: item.productId,
             quantity: item.quantity,
             usedBatches: item.usedBatches || []
-          }))
+          })),
+          returns: hasReturns ? returns : [],
+          discount: discountAmount
         },
         { headers: authHeader }
       );
@@ -1221,94 +1531,201 @@ const SalesHistoryPage = () => {
       )}
 
       {selectedOrder && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/60 px-4">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6 shadow-lg">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/60 px-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl border border-slatewash/50">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slatewash pb-4">
               <div>
-                <div className="text-lg font-semibold">{selectedOrder.orderNo}</div>
-                <div className="text-sm text-ink/60">{selectedOrder.customer?.name}</div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-clay">Transaction Audit File</span>
+                <div className="flex items-center gap-3 mt-0.5">
+                  <h2 className="text-2xl font-black text-ink">{selectedOrder.orderNo}</h2>
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
+                    selectedOrder.orderStatus === "delivered"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : selectedOrder.orderStatus === "cancelled"
+                      ? "bg-rose-50 text-rose-700 border border-rose-200"
+                      : "bg-amber-50 text-amber-700 border border-amber-200"
+                  }`}>
+                    {selectedOrder.orderStatus.replace("_", " ")}
+                  </span>
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
+                    selectedOrder.paymentStatus === "paid"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : selectedOrder.paymentStatus === "credit"
+                      ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                      : selectedOrder.paymentStatus === "partial"
+                      ? "bg-amber-50 text-amber-700 border border-amber-200"
+                      : "bg-slatewash/60 text-ink/50 border border-slatewash"
+                  }`}>
+                    {selectedOrder.paymentStatus.replace("_", " ")}
+                  </span>
+                </div>
               </div>
-              <button className="text-sm text-ink/60" type="button" onClick={resetModal}>
-                Close
+              <button 
+                type="button" 
+                onClick={resetModal}
+                className="rounded-xl border border-slatewash px-4 py-2 text-xs font-bold text-ink hover:bg-slatewash/30 transition"
+              >
+                Close Audit
               </button>
             </div>
 
             {mode === "view" && (
-              <div className="mt-4 space-y-4">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl bg-slatewash/60 p-4">
-                    <div className="text-xs text-ink/60">Customer</div>
-                    <div className="text-sm font-semibold">
-                      {selectedOrder.customer?.name || "Walk-in"}
+              <div className="mt-6 space-y-6">
+                
+                {/* Logistics & Financial Overview Cards */}
+                <div className="grid gap-4 md:grid-cols-3">
+                  
+                  {/* Customer & Route Logistics */}
+                  <div className="rounded-2xl bg-slatewash/20 border border-slatewash/45 p-4 space-y-3.5">
+                    <div className="text-[10px] font-black text-ink/40 uppercase tracking-wider">Logistics & Route</div>
+                    
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-full bg-ink/5 text-ink/70 font-bold text-xs flex items-center justify-center uppercase shrink-0">
+                        {selectedOrder.customer?.name?.charAt(0) || "W"}
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-ink/45 font-bold uppercase">Customer Profile</div>
+                        <div className="text-sm font-extrabold text-ink leading-tight">
+                          {selectedOrder.customer?.name || "Walk-in Customer"}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-2 text-xs text-ink/60">Order Date</div>
-                    <div className="text-sm font-semibold">
-                      {formatDate(selectedOrder.createdAt)}
-                    </div>
-                    <div className="mt-2 text-xs text-ink/60">Delivery Date</div>
-                    <div className="text-sm font-semibold">
-                      {formatDate(selectedOrder.deliveryDate)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl bg-slatewash/60 p-4">
-                    <div className="text-xs text-ink/60">Order Status</div>
-                    <div className="text-sm font-semibold">
-                      {selectedOrder.orderStatus.replace("_", " ")}
-                    </div>
-                    <div className="mt-2 text-xs text-ink/60">Payment Status</div>
-                    <div className="text-sm font-semibold">
-                      {selectedOrder.paymentStatus.replace("_", " ")}
-                    </div>
-                    <div className="mt-2 text-xs text-ink/60">Order Total</div>
-                    <div className="text-sm font-semibold">
-                      {formatCurrency(selectedOrder.orderTotal)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl bg-slatewash/60 p-4">
-                    <div className="text-xs text-ink/60">Returns</div>
-                    <div className="text-sm font-semibold">
-                      {formatCurrency(selectedOrder.returnTotal || 0)}
-                    </div>
-                    <div className="mt-2 text-xs text-ink/60">Net Total</div>
-                    <div className="text-sm font-semibold">
-                      {formatCurrency(selectedOrder.netTotal || selectedOrder.orderTotal)}
-                    </div>
-                    <div className="mt-2 text-xs text-ink/60">Paid</div>
-                    <div className="text-sm font-semibold">
-                      {formatCurrency(selectedOrder.paidAmount || 0)}
-                    </div>
-                    <div className="mt-2 text-xs text-ink/60">Due</div>
-                    <div className="text-sm font-semibold">
-                      {formatCurrency(selectedOrder.dueAmount || 0)}
+
+                    <div className="pt-2 border-t border-slatewash/40 space-y-2 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Booked By:</span>
+                        <span className="font-semibold text-ink">{selectedOrder.cashier?.name || "System Office"}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Order Date:</span>
+                        <span className="font-semibold text-ink">{formatDate(selectedOrder.createdAt)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Delivery Date:</span>
+                        <span className="font-semibold text-ink">{formatDate(selectedOrder.deliveryDate)}</span>
+                      </div>
                     </div>
                   </div>
+
+                  {/* Operational Flow Status */}
+                  <div className="rounded-2xl bg-slatewash/20 border border-slatewash/45 p-4 space-y-3.5">
+                    <div className="text-[10px] font-black text-ink/40 uppercase tracking-wider">FMCG Audit Status</div>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-[10px] text-ink/45 font-bold uppercase">Order Lifecycle</div>
+                        <div className="text-sm font-extrabold text-ink mt-0.5">
+                          {selectedOrder.orderStatus === "pending_delivery" && "Awaiting Dispatch / Route Assignment"}
+                          {selectedOrder.orderStatus === "delivered" && "Delivered & Reconciled"}
+                          {selectedOrder.orderStatus === "cancelled" && "Voided / Cancelled"}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] text-ink/45 font-bold uppercase">Payment Mode</div>
+                        <div className="text-sm font-extrabold text-ink mt-0.5">
+                          {selectedOrder.paymentStatus === "credit" && "Credit Account Agreement"}
+                          {selectedOrder.paymentStatus === "paid" && "Paid In Full (Settled)"}
+                          {selectedOrder.paymentStatus === "partial" && "Partial Payment Collected"}
+                          {selectedOrder.paymentStatus === "not_collected" && "No Collection Logged"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Financial Balance Summary */}
+                  <div className="rounded-2xl bg-slatewash/20 border border-slatewash/45 p-4 space-y-3">
+                    <div className="text-[10px] font-black text-ink/40 uppercase tracking-wider">Financial Statement</div>
+                    
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Gross Invoice:</span>
+                        <span className="font-mono text-ink font-semibold">{formatCurrency(selectedOrder.orderTotal)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Returns Adjust:</span>
+                        <span className="font-mono text-amber-700">-{formatCurrency(selectedOrder.returnTotal || 0)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Discounts:</span>
+                        <span className="font-mono text-rose-600">-{formatCurrency(selectedOrder.discount || 0)}</span>
+                      </div>
+                      
+                      <div className="pt-2 border-t border-slatewash/50 flex justify-between items-baseline">
+                        <span className="text-sm font-extrabold text-ink">Net Payable:</span>
+                        <span className="font-mono text-base font-black text-leaf">
+                          {formatCurrency(selectedOrder.netTotal || selectedOrder.orderTotal)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Total Paid:</span>
+                        <span className="font-mono text-emerald-700 font-semibold">{formatCurrency(selectedOrder.paidAmount || 0)}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <span className="text-ink/50">Outstanding Due:</span>
+                        <span className={`font-mono font-bold ${selectedOrder.dueAmount > 0 ? "text-rose-600" : "text-ink"}`}>
+                          {formatCurrency(selectedOrder.dueAmount || 0)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
 
-                <div className="rounded-2xl border border-slatewash">
-                  <div className="flex items-center justify-between border-b border-slatewash px-4 py-3 text-sm font-semibold">
-                    <span>Items</span>
-                    <span>{selectedOrder.items.length} lines</span>
+                {/* Items Audit Table */}
+                <div className="rounded-2xl border border-slatewash overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-slatewash bg-slatewash/30 px-4 py-3 text-xs font-bold text-ink/70 uppercase tracking-wider">
+                    <span>Fulfillment Lines</span>
+                    <span>{selectedOrder.items.length} unique items</span>
                   </div>
-                  <div className="divide-y divide-slatewash">
-                    {selectedOrder.items.map((item) => (
-                      <div
-                        key={item.itemCode}
-                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
-                      >
-                        <div>
-                          <div className="font-semibold">{item.itemName}</div>
-                          <div className="text-xs text-ink/60">Item code: {item.itemCode}</div>
-                        </div>
-                        <div className="text-right text-xs text-ink/60">
-                          <div>{item.quantity} x {formatCurrency(item.unitPrice)}</div>
-                          <div className="text-sm font-semibold">
-                            {formatCurrency(item.lineTotal)}
+                  
+                  <div className="divide-y divide-slatewash/60">
+                    {selectedOrder.items.map((item, index) => (
+                      <div key={item.itemCode || index} className="p-4 space-y-3 hover:bg-slatewash/10 transition">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div>
+                            <div className="font-extrabold text-ink">{item.itemName}</div>
+                            <div className="text-xs font-mono text-ink/40 font-semibold mt-0.5">Code: {item.itemCode}</div>
+                          </div>
+                          
+                          <div className="flex items-center gap-6 text-right">
+                            <div className="text-xs text-ink/50">
+                              <div className="font-mono font-semibold">{item.quantity} units × {formatCurrency(item.unitPrice)}</div>
+                              <div className="text-sm font-black text-ink font-mono mt-0.5">
+                                {formatCurrency(item.lineTotal)}
+                              </div>
+                            </div>
                           </div>
                         </div>
+
+                        {/* FIFO Batch Allocation Log */}
+                        {item.usedBatches && item.usedBatches.length > 0 && (
+                          <div className="rounded-xl bg-slatewash/35 p-3 text-xs space-y-2 border border-slatewash/30">
+                            <div className="text-[9px] font-black text-ink/40 uppercase tracking-widest border-b border-slatewash/40 pb-1">
+                              Fulfillment Batches (FIFO Traceability)
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
+                              {item.usedBatches.map((batch, bIdx) => (
+                                <div key={bIdx} className="bg-white/80 border border-slatewash/30 rounded-lg p-2 flex flex-col justify-between">
+                                  <div className="text-[10px] text-ink/40 font-bold uppercase">Batch Reference</div>
+                                  <div className="font-mono font-bold text-ink text-xs mt-0.5">{batch.batchNo}</div>
+                                  <div className="text-[10px] text-ink/60 mt-1 flex justify-between">
+                                    <span>Qty: <strong className="text-ink font-bold">{batch.qty}</strong></span>
+                                    <span>Rate: <strong className="text-ink font-mono">{formatCurrency(batch.billingPrice)}</strong></span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
+
               </div>
             )}
 
@@ -1420,8 +1837,232 @@ const SalesHistoryPage = () => {
                     </div>
                   </div>
                 ))}
+
+                {/* Discount percentage input */}
+                <div className="mt-4 p-4 rounded-2xl bg-slatewash/60 border border-slatewash text-sm">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs text-ink/60 font-semibold uppercase tracking-wider">Discount (%)</label>
+                      <input
+                        className="mt-1 w-full rounded-lg border border-slatewash px-3 py-2 text-sm"
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={discountPercent}
+                        onChange={(event) => setDiscountPercent(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-ink/60 font-semibold uppercase tracking-wider">Discount Amount</label>
+                      <div className="mt-1 rounded-lg bg-white px-3 py-2 text-sm border border-slatewash/40 font-mono font-bold">
+                        {(() => {
+                          const orderTotal = editItems.reduce((sum, item) => sum + item.lineTotal, 0);
+                          const returnTotal = hasReturns ? returns.reduce((sum, item) => sum + item.returnTotal, 0) : 0;
+                          const baseTotal = Math.max(orderTotal - returnTotal, 0);
+                          const discountAmount = Math.max((baseTotal * Number(discountPercent || 0)) / 100, 0);
+                          return formatCurrency(discountAmount);
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Returns section */}
+                <div className="space-y-3 border-t border-slatewash pt-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-ink/70">
+                    <input
+                      type="checkbox"
+                      checked={hasReturns}
+                      onChange={(event) => {
+                        if (!event.target.checked && returns.length > 0) {
+                          const confirmClear = window.confirm(
+                            "Remove all return items and hide return section?"
+                          );
+                          if (!confirmClear) {
+                            return;
+                          }
+                          setReturns([]);
+                          setReturnForm({
+                            productId: "",
+                            itemCode: "",
+                            itemName: "",
+                            quantity: "",
+                            returnPrice: "",
+                            condition: "resellable",
+                            originalInvoiceNo: "",
+                            reason: ""
+                          });
+                          setReturnSearch("");
+                        }
+                        setHasReturns(event.target.checked);
+                      }}
+                      className="h-4 w-4"
+                    />
+                    Has Returns
+                  </label>
+
+                  {hasReturns && (
+                    <div className="space-y-3 rounded-2xl border border-slatewash p-4">
+                      <div className="relative">
+                        <input
+                          className="w-full rounded-lg border border-slatewash px-3 py-3 text-base"
+                          placeholder="Search return item by code or name"
+                          value={returnSearch}
+                          onChange={(event) => {
+                            setReturnSearch(event.target.value);
+                            setReturnForm((prev) => ({ ...prev, productId: "" }));
+                          }}
+                        />
+                        {returnSuggestions.length > 0 && (
+                          <div className="absolute z-10 mt-2 w-full rounded-2xl border border-slatewash bg-white shadow">
+                            {returnSuggestions.slice(0, 6).map((product) => (
+                              <button
+                                key={product._id}
+                                type="button"
+                                className="w-full px-4 py-3 text-left text-sm hover:bg-slatewash/60"
+                                onClick={() => handleSelectReturnProduct(product)}
+                              >
+                                {product.itemCode} - {product.displayName}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <input
+                          className="rounded-lg border border-slatewash px-3 py-3 text-base"
+                          name="quantity"
+                          placeholder="Qty"
+                          type="number"
+                          min="1"
+                          value={returnForm.quantity}
+                          onChange={handleReturnChange}
+                        />
+                        <input
+                          className="rounded-lg border border-slatewash px-3 py-3 text-base"
+                          name="returnPrice"
+                          placeholder="Return price"
+                          type="number"
+                          min="0"
+                          value={returnForm.returnPrice}
+                          onChange={handleReturnChange}
+                        />
+                      </div>
+                      <select
+                        className="rounded-lg border border-slatewash px-3 py-3 text-base"
+                        name="condition"
+                        value={returnForm.condition}
+                        onChange={handleReturnChange}
+                      >
+                        <option value="resellable">Resellable</option>
+                        <option value="damaged">Damaged</option>
+                        <option value="expired">Expired</option>
+                      </select>
+                      <input
+                        className="rounded-lg border border-slatewash px-3 py-3 text-base"
+                        name="originalInvoiceNo"
+                        placeholder="Original invoice (optional)"
+                        value={returnForm.originalInvoiceNo}
+                        onChange={handleReturnChange}
+                      />
+                      <input
+                        className="rounded-lg border border-slatewash px-3 py-3 text-base"
+                        name="reason"
+                        placeholder="Reason (optional)"
+                        value={returnForm.reason}
+                        onChange={handleReturnChange}
+                      />
+                      <button
+                        className="w-full rounded-lg bg-ink py-3 text-sand"
+                        type="button"
+                        onClick={addReturnItem}
+                      >
+                        Add Return Item
+                      </button>
+                    </div>
+                  )}
+
+                  {hasReturns && returns.length > 0 && (
+                    <div className="space-y-2">
+                      {returns.map((item, index) => (
+                        <div
+                          key={`${item.productId}-${index}`}
+                          className="rounded-2xl bg-slatewash/60 p-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm font-semibold">{item.itemName}</div>
+                              <div className="text-xs text-ink/60">
+                                {formatCurrency(item.returnPrice)} each - {item.condition}
+                              </div>
+                            </div>
+                            <button
+                              className="text-xs font-semibold text-clay"
+                              type="button"
+                              onClick={() => removeReturn(index)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <input
+                              className="rounded-lg border border-slatewash px-3 py-2"
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(event) =>
+                                updateReturnQty(index, Number(event.target.value))
+                              }
+                            />
+                            <div className="rounded-lg bg-white px-3 py-2 text-sm">
+                              {formatCurrency(item.returnTotal)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Edit Totals Summary Preview */}
+                <div className="p-4 rounded-2xl bg-ink/5 border border-slatewash/60 text-xs space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-ink/60">Gross Order Total:</span>
+                    <span className="font-semibold">{formatCurrency(editItems.reduce((sum, item) => sum + item.lineTotal, 0))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ink/60">Discount Adjustments:</span>
+                    <span className="font-semibold text-rose-600">
+                      -{(() => {
+                        const orderTotal = editItems.reduce((sum, item) => sum + item.lineTotal, 0);
+                        const returnTotal = hasReturns ? returns.reduce((sum, item) => sum + item.returnTotal, 0) : 0;
+                        const baseTotal = Math.max(orderTotal - returnTotal, 0);
+                        return formatCurrency(Math.max((baseTotal * Number(discountPercent || 0)) / 100, 0));
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-ink/60">Market Return Deductions:</span>
+                    <span className="font-semibold text-amber-700">
+                      -{formatCurrency(hasReturns ? returns.reduce((sum, item) => sum + item.returnTotal, 0) : 0)}
+                    </span>
+                  </div>
+                  <div className="pt-2 border-t border-slatewash/60 flex justify-between items-baseline font-bold text-sm">
+                    <span className="text-ink">Estimated Net Payable:</span>
+                    <span className="text-leaf font-black font-mono">
+                      {(() => {
+                        const orderTotal = editItems.reduce((sum, item) => sum + item.lineTotal, 0);
+                        const returnTotal = hasReturns ? returns.reduce((sum, item) => sum + item.returnTotal, 0) : 0;
+                        const baseTotal = Math.max(orderTotal - returnTotal, 0);
+                        const discountAmount = Math.max((baseTotal * Number(discountPercent || 0)) / 100, 0);
+                        return formatCurrency(Math.max(baseTotal - discountAmount, 0));
+                      })()}
+                    </span>
+                  </div>
+                </div>
+
                 <button
-                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-sand"
+                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-sand hover:bg-ink/90 transition shadow-sm"
                   type="button"
                   onClick={handleUpdateOrder}
                   disabled={saving}
@@ -1544,6 +2185,8 @@ const SalesHistoryPage = () => {
                           setReturns([]);
                           setReturnForm({
                             productId: "",
+                            itemCode: "",
+                            itemName: "",
                             quantity: "",
                             returnPrice: "",
                             condition: "resellable",
