@@ -5,12 +5,10 @@ const getStoredUser = () => {
   if (typeof window === "undefined") {
     return { name: "Admin", role: "admin", email: "" };
   }
-
   const raw = localStorage.getItem("user");
   if (!raw) {
     return { name: "Admin", role: localStorage.getItem("role") || "admin", email: "" };
   }
-
   try {
     const parsed = JSON.parse(raw);
     return {
@@ -38,43 +36,30 @@ const formatRoleName = (role) => {
   return role;
 };
 
-/* ── Sun icon (light mode indicator) ─────────────────────────────── */
+/* ── Sun icon ─── */
 const SunIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    className="h-4 w-4"
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-    strokeWidth={2}
-  >
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <circle cx="12" cy="12" r="5" />
-    <path
-      strokeLinecap="round"
-      d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
-    />
+    <path strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
   </svg>
 );
 
-/* ── Moon icon (dark mode indicator) ─────────────────────────────── */
+/* ── Moon icon ─── */
 const MoonIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    className="h-4 w-4"
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-    strokeWidth={2}
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"
-    />
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
   </svg>
 );
 
-const TopBar = ({ onToggleSidebar, collapsed }) => {
+/* ── Sign-out icon (for mobile icon-only button) ─── */
+const SignOutIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+  </svg>
+);
+
+/* ── TopBar ─────────────────────────────────────────────────────── */
+const TopBar = ({ onToggle, collapsed }) => {
   const navigate = useNavigate();
   const user = getStoredUser();
   const { darkMode, toggleDarkMode } = useTheme();
@@ -87,37 +72,35 @@ const TopBar = ({ onToggleSidebar, collapsed }) => {
   };
 
   return (
-    <header className="flex items-center justify-between border-b border-slatewash dark:border-slate-700 bg-white/70 dark:bg-slate-900/80 px-4 py-3 backdrop-blur sticky top-0 z-10">
-      {/* Left: hamburger + title */}
-      <div className="flex items-center gap-3">
-        {/* hamburger button – mirrors the sidebar toggle */}
+    <header className="flex items-center justify-between border-b border-slatewash dark:border-slate-700 bg-white/70 dark:bg-slate-900/80 px-3 sm:px-4 py-3 backdrop-blur sticky top-0 z-10">
+
+      {/* ── Left: hamburger + brand ── */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         <button
-          onClick={onToggleSidebar}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-ink/60 hover:bg-slatewash hover:text-ink transition dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+          id="sidebar-toggle"
+          onClick={onToggle}
+          aria-label="Toggle sidebar"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink/60 hover:bg-slatewash hover:text-ink transition dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
 
-        <div>
-          <div className="text-base font-semibold leading-tight dark:text-slate-100">POS Control Center</div>
-          <div className="text-xs text-ink/50 dark:text-slate-400">JSP Distributors daily operations</div>
+        <div className="min-w-0">
+          <div className="text-sm sm:text-base font-semibold leading-tight truncate dark:text-slate-100">
+            POS Control Center
+          </div>
+          <div className="hidden sm:block text-xs text-ink/50 dark:text-slate-400 truncate">
+            JSP Distributors daily operations
+          </div>
         </div>
       </div>
 
-      {/* Right: dark mode toggle + user info + sign out */}
-      <div className="flex items-center gap-3">
+      {/* ── Right: dark mode toggle + user info + sign out ── */}
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
 
-        {/* ── Dark Mode Toggle ─────────────────────────── */}
+        {/* Dark mode toggle */}
         <button
           id="dark-mode-toggle"
           onClick={toggleDarkMode}
@@ -131,26 +114,33 @@ const TopBar = ({ onToggleSidebar, collapsed }) => {
             }
           `}
         >
-          <span
-            className="transition-transform duration-300"
-            style={{ transform: darkMode ? "rotate(0deg)" : "rotate(0deg)" }}
-          >
-            {darkMode ? <SunIcon /> : <MoonIcon />}
-          </span>
-
-          {/* Ripple glow on dark mode active */}
+          {darkMode ? <SunIcon /> : <MoonIcon />}
           {darkMode && (
             <span className="absolute inset-0 rounded-full bg-amber-300/10 animate-ping pointer-events-none" />
           )}
         </button>
 
+        {/* User name + role — hidden on small mobile */}
         <div className="hidden sm:block text-right">
-          <div className="text-sm font-semibold dark:text-slate-100">{user.name}</div>
-          <div className="text-xs text-ink/60 dark:text-slate-400">{formatRoleName(user.role)}</div>
+          <div className="text-sm font-semibold dark:text-slate-100 truncate max-w-[120px]">{user.name}</div>
+          <div className="text-xs text-ink/60 dark:text-slate-400 truncate max-w-[120px]">{formatRoleName(user.role)}</div>
         </div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-clay text-white text-sm font-bold shrink-0">
+
+        {/* Avatar */}
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clay text-white text-sm font-bold">
           {getInitials(user.name)}
         </div>
+
+        {/* Sign out — text button on sm+, icon-only on xs */}
+        <button
+          className="sm:hidden flex h-9 w-9 items-center justify-center rounded-full border border-ink/20 dark:border-slate-600 text-ink dark:text-slate-200 hover:bg-slatewash dark:hover:bg-slate-700 transition"
+          onClick={handleSignOut}
+          type="button"
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <SignOutIcon />
+        </button>
         <button
           className="hidden sm:inline-flex rounded-full border border-ink/20 dark:border-slate-600 px-4 py-1.5 text-xs font-semibold text-ink dark:text-slate-200 hover:bg-slatewash dark:hover:bg-slate-700 transition"
           onClick={handleSignOut}

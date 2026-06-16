@@ -82,6 +82,11 @@ const Icons = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeMiterlimit="10" d="M16 15v-6a4 4 0 00-4-4H4m0 0l4-4m-4 4l4 4m-4 4h8a4 4 0 014 4v2" />
     </svg>
   ),
+  close: (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  ),
 };
 
 /* ─── Map route → icon key ──────────────────────────────────────────── */
@@ -224,7 +229,7 @@ const formatRoleName = (role) => {
 };
 
 /* ─── Component ─────────────────────────────────────────────────────── */
-const Sidebar = ({ collapsed, onToggle }) => {
+const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -237,25 +242,34 @@ const Sidebar = ({ collapsed, onToggle }) => {
 
   return (
     <aside
-      className={`
-        relative flex flex-col min-h-screen bg-ink text-sand dark:bg-slate-900 dark:border-r dark:border-slate-700/50
-        transition-all duration-300 ease-in-out shrink-0
-        ${collapsed ? "w-[68px]" : "w-64"}
-      `}
+      className={[
+        /* ── Shared styles ── */
+        "flex flex-col h-screen bg-ink text-sand dark:bg-slate-900 dark:border-r dark:border-slate-700/50",
+        "transition-all duration-300 ease-in-out shrink-0",
+        /* ── Mobile: fixed off-canvas drawer ── */
+        "fixed inset-y-0 left-0 z-50",
+        mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full",
+        /* ── Desktop: in-flow, no transform ── */
+        "md:static md:z-auto md:inset-auto md:translate-x-0 md:shadow-none",
+        /* ── Width: always 256px on mobile, variable on desktop ── */
+        "w-64",
+        collapsed ? "md:w-[68px]" : "md:w-64",
+      ].join(" ")}
     >
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div className={`flex items-center border-b border-white/10 px-4 py-5 ${collapsed ? "justify-center" : "justify-between"}`}>
-        {!collapsed && (
-          <span className="text-base font-bold tracking-tight whitespace-nowrap overflow-hidden">
+      <div className={`flex items-center border-b border-white/10 px-4 py-5 ${collapsed ? "md:justify-center" : "justify-between"}`}>
+        {/* Brand name — always show on mobile; on desktop only when expanded */}
+        {(!collapsed || mobileOpen) && (
+          <span className="text-base font-bold tracking-tight whitespace-nowrap overflow-hidden md:block">
             JSP Distributors
           </span>
         )}
+        {/* Desktop-only collapse toggle */}
         <button
           onClick={onToggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="flex items-center justify-center rounded-lg p-1.5 text-sand/60 hover:bg-white/10 hover:text-sand transition"
+          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-sand/60 hover:bg-white/10 hover:text-sand transition"
         >
-          {/* hamburger / arrow icon */}
           {collapsed ? (
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -266,12 +280,21 @@ const Sidebar = ({ collapsed, onToggle }) => {
             </svg>
           )}
         </button>
+        {/* Mobile-only close (X) button */}
+        <button
+          onClick={onMobileClose}
+          aria-label="Close menu"
+          className="flex md:hidden items-center justify-center rounded-lg p-1.5 text-sand/60 hover:bg-white/10 hover:text-sand transition"
+        >
+          {Icons.close}
+        </button>
       </div>
 
       {/* ── Nav items ──────────────────────────────────────────── */}
       <nav className="flex flex-col gap-4 px-2 py-4 flex-1 overflow-y-auto overflow-x-hidden">
         {getNavItems(getCurrentRole()).map((group, idx) => (
           <div key={idx} className="space-y-1">
+            {/* Section label — hidden when desktop-collapsed */}
             {!collapsed && (
               <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-sand/40 mb-1">
                 {group.section}
@@ -282,8 +305,9 @@ const Sidebar = ({ collapsed, onToggle }) => {
                 key={item.to}
                 to={item.to}
                 title={collapsed ? item.label : undefined}
+                onClick={onMobileClose}   /* auto-close drawer on navigation */
                 className={({ isActive }) =>
-                  `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition
+                  `group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition
                   ${isActive
                     ? "bg-clay text-white"
                     : "text-sand/80 hover:bg-white/10 hover:text-sand"
@@ -293,20 +317,20 @@ const Sidebar = ({ collapsed, onToggle }) => {
                 {/* icon */}
                 <span className="shrink-0">{iconFor(item.to)}</span>
 
-                {/* label – fades out when collapsed */}
-                {!collapsed && (
+                {/* label — always show on mobile; hidden when desktop-collapsed */}
+                {(!collapsed) && (
                   <span className="whitespace-nowrap overflow-hidden text-ellipsis">
                     {item.label}
                   </span>
                 )}
 
-                {/* tooltip when collapsed */}
+                {/* tooltip when desktop-collapsed */}
                 {collapsed && (
                   <span className="
                     pointer-events-none absolute left-full ml-3 z-50
                     rounded-lg bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-white
                     opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap
-                    shadow-xl
+                    shadow-xl hidden md:block
                   ">
                     {item.label}
                   </span>
@@ -318,10 +342,10 @@ const Sidebar = ({ collapsed, onToggle }) => {
       </nav>
 
       {/* ── User card ──────────────────────────────────────────── */}
-      <div className={`border-t border-white/10 p-3 ${collapsed ? "flex justify-center" : ""}`}>
+      <div className={`border-t border-white/10 p-3 ${collapsed ? "md:flex md:justify-center" : ""}`}>
         {collapsed ? (
-          /* collapsed → just avatar + tooltip */
-          <div className="group relative flex justify-center">
+          /* Desktop-collapsed → avatar + tooltip only */
+          <div className="hidden md:block group relative flex justify-center">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-clay text-white text-sm font-bold cursor-default">
               {getInitials(user.name)}
             </div>
@@ -333,8 +357,10 @@ const Sidebar = ({ collapsed, onToggle }) => {
               {user.name} · {formatRoleName(user.role)}
             </span>
           </div>
-        ) : (
-          /* expanded → full card */
+        ) : null}
+
+        {/* Full card — always on mobile, and when desktop is expanded */}
+        {(!collapsed || mobileOpen) && (
           <div className="rounded-2xl bg-white/10 dark:bg-slate-700/40 p-4">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clay text-white text-sm font-bold">
