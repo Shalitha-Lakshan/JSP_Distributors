@@ -8,7 +8,7 @@ const MainLayout = () => {
 
   return (
     /* ── Outer shell: locked to viewport, no page-level scroll ── */
-    <div className="h-screen overflow-hidden flex bg-sand">
+    <div className="h-screen overflow-hidden flex bg-sand dark:bg-slate-950">
 
       {/* ── Sidebar: full height, never scrolls away ── */}
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
@@ -20,7 +20,7 @@ const MainLayout = () => {
         <TopBar onToggleSidebar={() => setCollapsed((c) => !c)} collapsed={collapsed} />
 
         {/* ── Scrollable content area: only this region scrolls ── */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 dark:bg-slate-950/50">
           <Outlet />
         </main>
 

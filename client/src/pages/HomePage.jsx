@@ -31,7 +31,7 @@ const steps = [
 ];
 
 const HomePage = () => (
-  <div className="relative min-h-screen w-full overflow-x-hidden bg-sand text-ink flex flex-col">
+  <div className="relative min-h-screen w-full overflow-x-hidden bg-sand dark:bg-slate-950 text-ink flex flex-col">
     <div className="absolute inset-0 pointer-events-none">
       <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-clay/30 blur-3xl float-slow" />
       <div className="absolute top-32 -right-20 h-80 w-80 rounded-full bg-leaf/30 blur-3xl float-medium" />
@@ -97,7 +97,7 @@ const HomePage = () => (
             ))}
           </div>
         </div>
-        <div className="rounded-3xl bg-white/80 p-6 shadow-lg">
+              <div className="rounded-3xl bg-white/80 dark:bg-slate-800 p-6 shadow-lg">
           <div className="text-sm font-semibold text-ink/60">Today Summary</div>
           <div className="mt-4 space-y-4">
             {[
@@ -123,7 +123,7 @@ const HomePage = () => (
       <section className="mx-auto max-w-6xl px-4 pb-12 sm:px-6 md:px-12">
         <div className="grid gap-6 md:grid-cols-3">
           {highlights.map((card) => (
-            <div key={card.title} className="rounded-3xl bg-white/90 p-6 shadow">
+            <div key={card.title} className="rounded-3xl bg-white/90 dark:bg-slate-800 p-6 shadow">
               <h3 className="text-lg font-semibold">{card.title}</h3>
               <p className="mt-3 text-sm text-ink/70">{card.description}</p>
             </div>
@@ -158,7 +158,7 @@ const HomePage = () => (
 
       <section className="mx-auto max-w-6xl px-4 pb-12 sm:px-6 md:px-12">
         <div className="grid gap-6 md:grid-cols-[1fr_1fr]">
-          <div className="rounded-3xl bg-white/80 p-6 shadow">
+          <div className="rounded-3xl bg-white/80 dark:bg-slate-800 p-6 shadow">
             <h3 className="text-xl font-semibold">Smart product lookup</h3>
             <p className="mt-2 text-sm text-ink/70">
               Search by item code, product name, size, category, and Sinhala/English keywords.
@@ -175,7 +175,7 @@ const HomePage = () => (
               ))}
             </div>
           </div>
-          <div className="rounded-3xl bg-white/80 p-6 shadow">
+          <div className="rounded-3xl bg-white/80 dark:bg-slate-800 p-6 shadow">
             <h3 className="text-xl font-semibold">Cleaner daily closing</h3>
             <p className="mt-2 text-sm text-ink/70">
               Separate sales totals from collections. Track opening vs closing outstanding

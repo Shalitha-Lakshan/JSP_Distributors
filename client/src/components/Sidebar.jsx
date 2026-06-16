@@ -238,7 +238,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
   return (
     <aside
       className={`
-        relative flex flex-col min-h-screen bg-ink text-sand
+        relative flex flex-col min-h-screen bg-ink text-sand dark:bg-slate-900 dark:border-r dark:border-slate-700/50
         transition-all duration-300 ease-in-out shrink-0
         ${collapsed ? "w-[68px]" : "w-64"}
       `}
@@ -335,7 +335,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
           </div>
         ) : (
           /* expanded → full card */
-          <div className="rounded-2xl bg-white/10 p-4">
+          <div className="rounded-2xl bg-white/10 dark:bg-slate-700/40 p-4">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clay text-white text-sm font-bold">
                 {getInitials(user.name)}

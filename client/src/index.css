@@ -9,7 +9,9 @@ body,
   min-height: 100%;
 }
 
+/* ─── Light mode base ──────────────────────────────────────────────────── */
 :root {
+  font-size: 17px;
   font-family: "Trebuchet MS", Verdana, sans-serif;
   color: #0f172a;
   background-color: #f8f4e8;
@@ -20,12 +22,199 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background: radial-gradient(circle at 10% 10%, #ffe6c7 0%, #f8f4e8 45%, #eef3f8 100%);
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 #root {
   min-height: 100vh;
 }
 
+/* ─── Dark mode base ────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  background: radial-gradient(circle at 10% 10%, #1e293b 0%, #0f172a 50%, #0c1628 100%);
+  color: #f1f5f9;
+}
+
+/* ─── Dark: Scrollbars ─────────────────────────────────────────────────── */
+.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 9999px;
+}
+
+/* ─── Dark: Card & surface overrides (bg-white variants) ───────────────── */
+.dark .bg-white\/80,
+.dark .bg-white\/90,
+.dark .bg-white\/85,
+.dark .bg-white\/75,
+.dark .bg-white\/70,
+.dark .bg-white\/60,
+.dark .bg-white\/50,
+.dark .bg-white\/40 {
+  background-color: rgb(30 41 59 / 0.95) !important;
+}
+
+.dark .bg-white {
+  background-color: #1e293b !important;
+}
+
+/* ─── Dark: Sand / page background ─────────────────────────────────────── */
+.dark .bg-sand {
+  background-color: #0f172a !important;
+}
+
+/* ─── Dark: Slatewash backgrounds ──────────────────────────────────────── */
+.dark .bg-slatewash {
+  background-color: #334155 !important;
+}
+.dark .bg-slatewash\/70,
+.dark .bg-slatewash\/60,
+.dark .bg-slatewash\/50,
+.dark .bg-slatewash\/45,
+.dark .bg-slatewash\/40,
+.dark .bg-slatewash\/30,
+.dark .bg-slatewash\/20,
+.dark .bg-slatewash\/15 {
+  background-color: rgb(51 65 85 / 0.7) !important;
+}
+
+/* ─── Dark: Text colors ─────────────────────────────────────────────────── */
+.dark .text-ink {
+  color: #f1f5f9 !important;
+}
+.dark .text-ink\/80 { color: rgb(241 245 249 / 0.8) !important; }
+.dark .text-ink\/70 { color: rgb(241 245 249 / 0.7) !important; }
+.dark .text-ink\/60 { color: rgb(241 245 249 / 0.6) !important; }
+.dark .text-ink\/50 { color: rgb(241 245 249 / 0.5) !important; }
+.dark .text-ink\/45 { color: rgb(241 245 249 / 0.45) !important; }
+.dark .text-ink\/40 { color: rgb(241 245 249 / 0.4) !important; }
+.dark .text-ink\/35 { color: rgb(241 245 249 / 0.35) !important; }
+.dark .text-ink\/30 { color: rgb(241 245 249 / 0.3) !important; }
+
+/* ─── Dark: Border colors ───────────────────────────────────────────────── */
+.dark .border-slatewash {
+  border-color: #334155 !important;
+}
+.dark .border-slatewash\/80,
+.dark .border-slatewash\/60,
+.dark .border-slatewash\/55,
+.dark .border-slatewash\/50,
+.dark .border-slatewash\/45,
+.dark .border-slatewash\/40,
+.dark .border-slatewash\/30 {
+  border-color: rgb(51 65 85 / 0.7) !important;
+}
+.dark .border-ink\/20 { border-color: rgb(241 245 249 / 0.15) !important; }
+.dark .border-ink\/10 { border-color: rgb(241 245 249 / 0.1) !important; }
+.dark .border-ink\/30 { border-color: rgb(241 245 249 / 0.2) !important; }
+
+/* ─── Dark: Dividers ────────────────────────────────────────────────────── */
+.dark .divide-slatewash\/45 > * + * { border-color: #334155 !important; }
+.dark .divide-slatewash > * + * { border-color: #334155 !important; }
+
+/* ─── Dark: Inputs, selects, textareas ─────────────────────────────────── */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.dark select,
+.dark textarea {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+  border-color: #334155 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: rgb(148 163 184 / 0.6) !important;
+}
+
+/* ─── Dark: Table rows ──────────────────────────────────────────────────── */
+.dark table {
+  color: #f1f5f9;
+}
+.dark th {
+  background-color: #1e293b !important;
+  color: rgb(148 163 184) !important;
+  border-color: #334155 !important;
+}
+.dark td {
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+.dark tr:hover td {
+  background-color: rgb(51 65 85 / 0.4) !important;
+}
+
+/* ─── Dark: Modal overlays ──────────────────────────────────────────────── */
+.dark .bg-black\/30,
+.dark .bg-black\/40,
+.dark .bg-black\/50 {
+  background-color: rgb(0 0 0 / 0.7) !important;
+}
+
+/* ─── Dark: bg-ink (already dark, stays dark — invert for light text on it) ── */
+/* bg-ink is used for sidebar & some buttons; text-sand on bg-ink looks fine as-is */
+
+/* ─── Dark: Special utility overrides ──────────────────────────────────── */
+/* bg-ink/5 used for avatar placeholder backgrounds */
+.dark .bg-ink\/5  { background-color: rgb(241 245 249 / 0.08) !important; }
+.dark .bg-ink\/10 { background-color: rgb(241 245 249 / 0.10) !important; }
+
+/* hover states */
+.dark .hover\:bg-slatewash:hover { background-color: #334155 !important; }
+.dark .hover\:text-ink:hover { color: #f1f5f9 !important; }
+
+/* ─── Dark: Status badge backgrounds (amber, emerald, red, rose) ─────────── */
+/* These use Tailwind built-in colors; override lightly colored variants */
+.dark .bg-amber-50  { background-color: rgb(120 53 15 / 0.3) !important; }
+.dark .bg-emerald-50 { background-color: rgb(6 78 59 / 0.3) !important; }
+.dark .bg-red-50    { background-color: rgb(127 29 29 / 0.3) !important; }
+.dark .bg-teal-50   { background-color: rgb(19 78 74 / 0.3) !important; }
+.dark .bg-blue-50   { background-color: rgb(30 58 138 / 0.3) !important; }
+.dark .bg-rose-50   { background-color: rgb(136 19 55 / 0.3) !important; }
+.dark .bg-orange-50 { background-color: rgb(124 45 18 / 0.3) !important; }
+.dark .bg-purple-50 { background-color: rgb(88 28 135 / 0.3) !important; }
+.dark .bg-indigo-50 { background-color: rgb(49 46 129 / 0.3) !important; }
+.dark .bg-gray-50   { background-color: #1e293b !important; }
+.dark .bg-gray-100  { background-color: #1e293b !important; }
+
+.dark .text-amber-700  { color: #fbbf24 !important; }
+.dark .text-emerald-700 { color: #34d399 !important; }
+.dark .text-red-700    { color: #f87171 !important; }
+.dark .text-teal-800   { color: #5eead4 !important; }
+.dark .text-blue-700   { color: #60a5fa !important; }
+.dark .text-rose-600, .dark .text-rose-700 { color: #fb7185 !important; }
+.dark .text-orange-700 { color: #fb923c !important; }
+
+/* ─── Dark: Gradient placeholders (chart area placeholder) ──────────────── */
+.dark .from-amber-200\/40 { --tw-gradient-from: rgb(217 119 6 / 0.15) !important; }
+.dark .via-clay\/20       { --tw-gradient-via: rgb(249 115 22 / 0.1) !important; }
+.dark .to-leaf\/20        { --tw-gradient-to: rgb(15 118 110 / 0.1) !important; }
+
+/* ─── Transition for smooth dark mode switch ────────────────────────────── */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: 200ms;
+  transition-timing-function: ease;
+}
+
+/* Exclude transitions on elements where they'd look jarring */
+input, select, textarea, button, a {
+  transition-property: background-color, border-color, color, box-shadow, transform, opacity;
+  transition-duration: 150ms;
+}
+
+/* ─── Float animations ──────────────────────────────────────────────────── */
 .float-slow {
   animation: float 16s ease-in-out infinite;
 }

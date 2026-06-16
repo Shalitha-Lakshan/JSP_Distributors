@@ -66,7 +66,7 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-sand text-ink">
+    <div className="min-h-screen bg-sand dark:bg-slate-950 text-ink">
     <div className="relative min-h-screen overflow-hidden">
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute -top-20 -left-16 h-64 w-64 rounded-full bg-clay/20 blur-3xl" />
@@ -95,7 +95,7 @@ const LoginPage = () => {
               "Credit sales & ledger",
               "Daily closing summaries"
             ].map((item) => (
-              <div key={item} className="rounded-2xl bg-white/80 p-4 text-sm shadow">
+              <div key={item} className="rounded-2xl bg-white/80 dark:bg-slate-800 p-4 text-sm shadow dark:text-slate-200">
                 {item}
               </div>
             ))}
@@ -108,7 +108,7 @@ const LoginPage = () => {
           </div>
         </div>
 
-        <div className="rounded-3xl bg-white/90 p-8 shadow-lg">
+        <div className="rounded-3xl bg-white/90 dark:bg-slate-800 p-8 shadow-lg">
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Welcome back</h2>
             <p className="text-sm text-ink/60">Use your admin, manager, or sales representative credentials.</p>
@@ -117,7 +117,7 @@ const LoginPage = () => {
             <label className="text-sm font-semibold text-ink/70">
               Email
               <input
-                className="mt-2 w-full rounded-xl border border-slatewash px-4 py-3"
+                className="mt-2 w-full rounded-xl border border-slatewash dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 px-4 py-3"
                 placeholder="admin@jsp.com"
                 type="email"
                 name="email"
@@ -128,7 +128,7 @@ const LoginPage = () => {
             <label className="text-sm font-semibold text-ink/70">
               Password
               <input
-                className="mt-2 w-full rounded-xl border border-slatewash px-4 py-3"
+                className="mt-2 w-full rounded-xl border border-slatewash dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 px-4 py-3"
                 placeholder="••••••••"
                 type="password"
                 name="password"

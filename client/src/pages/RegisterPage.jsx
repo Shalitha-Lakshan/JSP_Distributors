@@ -66,7 +66,7 @@ const RegisterPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-sand text-ink">
+    <div className="min-h-screen bg-sand dark:bg-slate-950 text-ink">
     <div className="relative min-h-screen overflow-hidden">
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute -top-16 -right-20 h-64 w-64 rounded-full bg-clay/20 blur-3xl" />
@@ -74,7 +74,7 @@ const RegisterPage = () => {
       </div>
 
       <div className="relative mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-6 py-10 md:grid-cols-[0.9fr_1.1fr]">
-        <div className="rounded-3xl bg-white/90 p-8 shadow-lg">
+        <div className="rounded-3xl bg-white/90 dark:bg-slate-800 p-8 shadow-lg">
           <div className="mb-6">
             <h2 className="text-2xl font-semibold">Create account</h2>
             <p className="text-sm text-ink/60">Set up a new manager or sales representative profile.</p>
@@ -190,7 +190,7 @@ const RegisterPage = () => {
               "Audit-ready records",
               "Centralized management"
             ].map((item) => (
-              <div key={item} className="rounded-2xl bg-white/80 p-4 text-sm shadow">
+              <div key={item} className="rounded-2xl bg-white/80 dark:bg-slate-700 p-4 text-sm shadow">
                 {item}
               </div>
             ))}
