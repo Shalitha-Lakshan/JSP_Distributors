@@ -1,10 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/client";
-
+import "./ReturnsPage.css";
 const formatCurrency = (value) => `Rs. ${Number(value || 0).toLocaleString("en-LK")}`;
 
 const formatDate = (value) =>
   value ? new Date(value).toLocaleDateString("en-LK", { year: "numeric", month: "short", day: "numeric" }) : "-";
+
+const supplierAddresses = {
+  "Ruhunu Foods": {
+    companyName: "Ruhunu Foods (Pvt) Ltd.",
+    streetAddress: "No: 235, Digana Road",
+    cityPostal: "Kundasale 20168",
+    country: "Sri Lanka"
+  },
+  "Gajamuthu Foods": {
+    companyName: "Gajamuthu Food Products Pvt Ltd",
+    streetAddress: "No 34, Jayathilakawatta Estate",
+    cityPostal: "Horana, Western Province",
+    country: "Sri Lanka"
+  }
+};
 
 const ReturnsPage = () => {
   const [pendingReturns, setPendingReturns] = useState([]);
@@ -503,7 +518,7 @@ const ReturnsPage = () => {
       {/* SUPPLIER RETURN INVOICE MODAL / PRINT VIEW */}
       {showInvoiceModal && activeInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm print:absolute print:inset-0 print:bg-white print:p-0 print:backdrop-blur-none overflow-y-auto">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl print:shadow-none print:max-w-none print:rounded-none">
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl print:shadow-none print:max-w-none print:rounded-none printable-invoice">
             {/* Modal Actions Header (Hidden on Print) */}
             <div className="mb-4 flex items-center justify-between border-b border-slatewash pb-3 print:hidden">
               <h3 className="text-lg font-bold text-ink">Supplier Return Invoice</h3>
@@ -530,10 +545,13 @@ const ReturnsPage = () => {
             <div className="p-4 print:p-0">
               {/* Invoice Brand Header */}
               <div className="flex justify-between items-start border-b-2 border-ink pb-6">
-                <div>
-                  <h1 className="text-3xl font-black tracking-tight text-ink">JSP DISTRIBUTORS</h1>
-                  <p className="text-xs text-ink/60 mt-1">Daily Operations & Warehouse Management</p>
-                  <p className="text-xs text-ink/60">Phone: +94 11 2345678 | Email: returns@jspdistributors.lk</p>
+                <div className="flex items-center gap-4">
+                  <img src="/logo.png" alt="JSP logo" className="h-16 w-16 object-contain" />
+                  <div>
+                    <h1 className="text-3xl font-black tracking-tight text-ink">JSP DISTRIBUTORS</h1>
+                    <p className="text-xs text-ink/60 mt-0.5">Daily Operations & Warehouse Management</p>
+                    <p className="text-xs text-ink/60">Phone: 0767761382 | Email: dilshanrajitha201@gmail.com</p>
+                  </div>
                 </div>
                 <div className="text-right">
                   <div className="inline-block bg-ink text-sand font-mono text-xs px-3 py-1.5 rounded-md font-bold mb-2">
@@ -550,9 +568,18 @@ const ReturnsPage = () => {
               <div className="grid grid-cols-2 gap-8 my-6 text-sm">
                 <div>
                   <div className="font-bold text-ink/50 uppercase tracking-wide text-xs">Dispatched To:</div>
-                  <div className="font-bold text-ink mt-1.5 text-base">{activeInvoice.supplierName || "Ruhunu Foods"}</div>
-                  <div className="text-ink/70 mt-1">Main Factory & Returns Warehouse</div>
-                  <div className="text-ink/70">Industrial Zone, Colombo, Sri Lanka</div>
+                  <div className="font-bold text-ink mt-1.5 text-base">
+                    {supplierAddresses[activeInvoice.supplierName]?.companyName || activeInvoice.supplierName || "Ruhunu Foods"}
+                  </div>
+                  <div className="text-ink/70 mt-1">
+                    {supplierAddresses[activeInvoice.supplierName]?.streetAddress || "Main Factory & Returns Warehouse"}
+                  </div>
+                  <div className="text-ink/70">
+                    {supplierAddresses[activeInvoice.supplierName]?.cityPostal || "Industrial Zone, Colombo"}
+                  </div>
+                  <div className="text-ink/70">
+                    {supplierAddresses[activeInvoice.supplierName]?.country || "Sri Lanka"}
+                  </div>
                 </div>
                 <div>
                   <div className="font-bold text-ink/50 uppercase tracking-wide text-xs">Origin Warehouse:</div>
