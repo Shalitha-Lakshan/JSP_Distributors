@@ -257,29 +257,39 @@ const Sidebar = ({ collapsed, onToggle, mobileOpen, onMobileClose }) => {
       ].join(" ")}
     >
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div className={`flex items-center border-b border-white/10 px-4 py-5 ${collapsed ? "md:justify-center" : "justify-between"}`}>
-        {/* Brand name — always show on mobile; on desktop only when expanded */}
-        {(!collapsed || mobileOpen) && (
-          <span className="text-base font-bold tracking-tight whitespace-nowrap overflow-hidden md:block">
-            JSP Distributors
-          </span>
+      <div className={`flex items-center border-b border-white/10 py-5 ${collapsed ? "px-2 md:justify-center" : "px-4 justify-between"}`}>
+        {/* Brand name and logo */}
+        {(!collapsed || mobileOpen) ? (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img src="/logo.png" alt="JSP Logo" className="h-8 w-8 object-contain shrink-0" />
+            <span className="text-base font-bold tracking-tight whitespace-nowrap overflow-hidden md:block">
+              JSP Distributors
+            </span>
+          </div>
+        ) : (
+          /* Desktop collapsed view: show clickable logo icon to expand */
+          <button
+            onClick={onToggle}
+            aria-label="Expand sidebar"
+            className="flex items-center justify-center rounded-lg p-1 hover:bg-white/10 transition"
+          >
+            <img src="/logo.png" alt="JSP Logo" className="h-8 w-8 object-contain" />
+          </button>
         )}
+
         {/* Desktop-only collapse toggle */}
-        <button
-          onClick={onToggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-sand/60 hover:bg-white/10 hover:text-sand transition"
-        >
-          {collapsed ? (
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          ) : (
+        {(!collapsed || mobileOpen) && (
+          <button
+            onClick={onToggle}
+            aria-label="Collapse sidebar"
+            className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-sand/60 hover:bg-white/10 hover:text-sand transition"
+          >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
-          )}
-        </button>
+          </button>
+        )}
+
         {/* Mobile-only close (X) button */}
         <button
           onClick={onMobileClose}
