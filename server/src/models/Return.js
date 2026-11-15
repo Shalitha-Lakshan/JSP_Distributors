@@ -20,6 +20,17 @@ const returnItemSchema = new mongoose.Schema(
       enum: ["pending", "dispatched"],
       default: "pending"
     },
+    inspectionStatus: {
+      type: String,
+      enum: ["pending_inspection", "approved", "rejected"],
+      default: "pending_inspection"
+    },
+    approvedResellableQty: { type: Number, default: 0, min: 0 },
+    rejectedQty: { type: Number, default: 0, min: 0 },
+    rejectionReason: { type: String, trim: true },
+    inspectedAt: { type: Date },
+    inspectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    stockBatchId: { type: mongoose.Schema.Types.ObjectId, ref: "StockBatch" },
     supplierInvoiceNo: { type: String },
     dispatchedAt: { type: Date }
   },
@@ -39,6 +50,15 @@ const returnSchema = new mongoose.Schema(
       enum: ["pending", "dispatched"],
       default: "pending"
     },
+    inspectionStatus: {
+      type: String,
+      enum: ["pending_inspection", "partially_approved", "approved", "rejected"],
+      default: "pending_inspection"
+    },
+    inspectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    inspectedAt: { type: Date },
+    inspectionNotes: { type: String, trim: true },
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" },
     supplierInvoiceNo: { type: String },
     dispatchedAt: { type: Date }
   },

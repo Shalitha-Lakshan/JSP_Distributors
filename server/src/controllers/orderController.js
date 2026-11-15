@@ -36,6 +36,19 @@ const reserveStockForItems = async (items) => {
       remainingQty: { $gt: 0 }
     }).sort({ receivedDate: 1 });
 
+    const totalBatchAvailable = batches.reduce((sum, b) => sum + Number(b.remainingQty || 0), 0);
+    if (totalBatchAvailable < quantity) {
+      const err = new Error(
+        `Insufficient stock for ${product.itemCode} (${product.displayName}). Available: ${totalBatchAvailable}, requested: ${quantity}`
+      );
+      err.status = 409;
+      err.statusCode = 409;
+      err.itemCode = product.itemCode;
+      err.availableQuantity = totalBatchAvailable;
+      err.requestedQuantity = quantity;
+      throw err;
+    }
+
     let remaining = quantity;
     let lineTotal = 0;
     const usedBatches = [];
@@ -59,17 +72,21 @@ const reserveStockForItems = async (items) => {
       });
 
       batchUpdates.push({
-        updateOne: {
-          filter: { _id: batch._id },
-          update: { $inc: { remainingQty: -takeQty } }
-        }
+        batchId: batch._id,
+        takeQty
       });
     }
 
     if (remaining > 0) {
-      throw new Error(
-        `Insufficient stock for ${product.displayName}. Available: ${quantity - remaining}`
+      const err = new Error(
+        `Insufficient stock for ${product.itemCode} (${product.displayName}). Available: ${quantity - remaining}, requested: ${quantity}`
       );
+      err.status = 409;
+      err.statusCode = 409;
+      err.itemCode = product.itemCode;
+      err.availableQuantity = quantity - remaining;
+      err.requestedQuantity = quantity;
+      throw err;
     }
 
     orderItems.push({
@@ -128,10 +145,66 @@ const restoreReservedStock = async (orderItems) => {
 };
 
 const createOrder = async (req, res) => {
-  const { customer, items = [] } = req.body;
+  const {
+    customer,
+    items = [],
+    returns = [],
+    discountPercent = 0,
+    discount,
+    idempotencyKey
+  } = req.body;
 
   if (!items.length) {
     return res.status(400).json({ message: "No items provided" });
+  }
+
+  // 1. Durable Idempotency Check: prevent duplicate order bookings and duplicate stock reservations
+  if (idempotencyKey && typeof idempotencyKey === "string" && idempotencyKey.trim()) {
+    const cleanKey = idempotencyKey.trim();
+    const existingOrder = await Order.findOne({ idempotencyKey: cleanKey })
+      .populate("customer", "name phone address customerType")
+      .populate("cashier", "name");
+
+    if (existingOrder) {
+      // Validate that request matches the existing order to prevent key reuse collisions
+      const existingCustId =
+        existingOrder.customer?._id?.toString() || existingOrder.customer?.toString() || null;
+      const reqCustId = customer ? customer.toString() : null;
+      const customerMatches = existingCustId === reqCustId;
+
+      const itemsMatch =
+        Array.isArray(existingOrder.items) &&
+        existingOrder.items.length === items.length &&
+        items.every((it) => {
+          const match = existingOrder.items.find(
+            (ei) => ei.productId.toString() === it.productId.toString()
+          );
+          return match && match.quantity === Number(it.quantity);
+        });
+
+      const reqReturns = returns || [];
+      const existingReturns = existingOrder.returns || [];
+      const returnsMatch =
+        existingReturns.length === reqReturns.length &&
+        reqReturns.every((r) => {
+          const match = existingReturns.find(
+            (er) =>
+              (er.productId?.toString() === r.productId?.toString() || er.itemCode === r.itemCode) &&
+              (er.condition || "resellable") === (r.condition || "resellable")
+          );
+          return match && match.quantity === Number(r.quantity);
+        });
+
+      if (customerMatches && itemsMatch && returnsMatch) {
+        // Safe idempotent replay: return the exact confirmed order without duplicate stock reservation
+        return res.status(200).json(existingOrder);
+      } else {
+        return res.status(409).json({
+          message:
+            "Idempotency conflict: The provided idempotency key was already used for a different order payload."
+        });
+      }
+    }
   }
 
   try {
@@ -154,19 +227,59 @@ const createOrder = async (req, res) => {
     const { orderItems, batchUpdates, stockUpdates } = await reserveStockForItems(items);
     const orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
 
-    if (batchUpdates.length > 0) {
-      await StockBatch.bulkWrite(batchUpdates);
-    }
+    const appliedBatchDeductions = [];
+    const appliedProductDeductions = [];
 
-    if (stockUpdates.size > 0) {
-      await Product.bulkWrite(
-        [...stockUpdates.entries()].map(([productId, qty]) => ({
-          updateOne: {
-            filter: { _id: productId },
-            update: { $inc: { totalStock: -qty } }
+    try {
+      if (batchUpdates.length > 0) {
+        for (const update of batchUpdates) {
+          const updatedBatch = await StockBatch.findOneAndUpdate(
+            { _id: update.batchId, remainingQty: { $gte: update.takeQty } },
+            { $inc: { remainingQty: -update.takeQty } },
+            { new: true }
+          );
+
+          if (!updatedBatch) {
+            const err = new Error(
+              "Stock conflict: Available units were claimed by another transaction during processing. Please refresh and retry."
+            );
+            err.status = 409;
+            err.statusCode = 409;
+            throw err;
           }
-        }))
-      );
+
+          appliedBatchDeductions.push(update);
+        }
+      }
+
+      if (stockUpdates.size > 0) {
+        for (const [productId, qty] of stockUpdates.entries()) {
+          const updatedProd = await Product.findOneAndUpdate(
+            { _id: productId, totalStock: { $gte: qty } },
+            { $inc: { totalStock: -qty } },
+            { new: true }
+          );
+
+          if (!updatedProd) {
+            const err = new Error(
+              "Product stock conflict: Insufficient total stock remaining. Please refresh catalogue."
+            );
+            err.status = 409;
+            err.statusCode = 409;
+            throw err;
+          }
+
+          appliedProductDeductions.push({ productId, qty });
+        }
+      }
+    } catch (err) {
+      for (const ded of appliedBatchDeductions) {
+        await StockBatch.findByIdAndUpdate(ded.batchId, { $inc: { remainingQty: ded.takeQty } });
+      }
+      for (const ded of appliedProductDeductions) {
+        await Product.findByIdAndUpdate(ded.productId, { $inc: { totalStock: ded.qty } });
+      }
+      throw err;
     }
 
     const counter = await Counter.findOneAndUpdate(
@@ -177,20 +290,80 @@ const createOrder = async (req, res) => {
     const orderSeq = String(counter.seq).padStart(8, "0");
     const orderNo = `ORD-${orderSeq}`;
 
+    // Normalize and strictly validate proposed market returns
+    const formattedReturns = [];
+    for (const r of (returns || [])) {
+      const qty = Number(r.quantity || 0);
+      const price = Number(r.returnPrice || 0);
+
+      if (qty <= 0 || isNaN(qty)) {
+        return res.status(400).json({ message: `Invalid quantity for return item ${r.itemName || r.itemCode}.` });
+      }
+
+      if (price <= 0 || isNaN(price)) {
+        return res.status(400).json({ message: `Return unit price for ${r.itemName || r.itemCode} must be greater than zero.` });
+      }
+
+      // Valuation Policy: return price must not exceed catalogue selling price
+      if (r.productId || r.itemCode) {
+        const prod = r.productId 
+          ? await Product.findById(r.productId) 
+          : await Product.findOne({ itemCode: r.itemCode });
+        if (prod && typeof prod.currentSellingPrice === "number" && price > prod.currentSellingPrice) {
+          return res.status(400).json({
+            message: `Return unit price (Rs. ${price.toFixed(2)}) for "${prod.displayName || prod.productName}" cannot exceed catalogue selling price (Rs. ${prod.currentSellingPrice.toFixed(2)}).`
+          });
+        }
+      }
+
+      const itemReturnTotal = Math.round(qty * price * 100) / 100;
+
+      formattedReturns.push({
+        productId: r.productId,
+        itemCode: r.itemCode,
+        itemName: r.itemName,
+        quantity: qty,
+        returnPrice: price,
+        returnTotal: itemReturnTotal,
+        condition: r.condition || "resellable",
+        reason: r.reason || "Proposed market return",
+        originalInvoiceNo: r.originalInvoiceNo || ""
+      });
+    }
+
+    const returnTotal = formattedReturns.reduce((sum, r) => sum + r.returnTotal, 0);
+    const baseTotal = Math.max(0, orderTotal - returnTotal);
+
+    let finalDiscount = 0;
+    let finalDiscountPercent = 0;
+    if (discountPercent !== undefined && discountPercent !== null && discountPercent !== "") {
+      finalDiscountPercent = Math.min(100, Math.max(0, Number(discountPercent || 0)));
+      finalDiscount = Math.round((baseTotal * (finalDiscountPercent / 100)) * 100) / 100;
+    } else if (discount !== undefined && discount !== null) {
+      finalDiscount = Math.min(baseTotal, Math.max(0, Number(discount || 0)));
+      finalDiscountPercent = baseTotal > 0 ? Math.round((finalDiscount / baseTotal) * 10000) / 100 : 0;
+    }
+
+    const netTotal = Math.max(0, baseTotal - finalDiscount);
+
     const order = await Order.create({
       orderNo,
       customer: customer || null,
       cashier: req.user?._id,
       items: orderItems,
+      returns: formattedReturns,
       orderTotal,
-      returnTotal: 0,
-      discount: 0,
-      netTotal: orderTotal,
+      returnTotal,
+      discount: finalDiscount,
+      discountPercent: finalDiscountPercent,
+      netTotal,
       paidAmount: 0,
-      dueAmount: orderTotal,
+      dueAmount: netTotal,
       orderStatus: "pending_delivery",
       paymentStatus: "not_collected",
-      stockReserved: true
+      stockReserved: true,
+      idempotencyKey:
+        idempotencyKey && typeof idempotencyKey === "string" ? idempotencyKey.trim() : undefined
     });
 
     if (activeTrip) {
@@ -202,7 +375,27 @@ const createOrder = async (req, res) => {
 
     return res.status(201).json(order);
   } catch (err) {
-    return res.status(400).json({ message: err.message || "Failed to create order" });
+    if (err.code === 11000 && idempotencyKey) {
+      try {
+        const cleanKey = idempotencyKey.trim();
+        const existing = await Order.findOne({ idempotencyKey: cleanKey })
+          .populate("customer", "name phone address customerType")
+          .populate("cashier", "name");
+        if (existing) {
+          return res.status(200).json(existing);
+        }
+      } catch {
+        // Fall through to default error response
+      }
+    }
+
+    const status = err.status || err.statusCode || 400;
+    return res.status(status).json({
+      message: err.message || "Failed to create order",
+      itemCode: err.itemCode,
+      availableQuantity: err.availableQuantity,
+      requestedQuantity: err.requestedQuantity
+    });
   }
 };
 
@@ -352,7 +545,17 @@ const deleteOrder = async (req, res) => {
 };
 
 const deliverOrder = async (req, res) => {
-  const { items = [], returns = [], discount = 0, paidAmount = 0, paymentMethod } = req.body;
+  const {
+    items = [],
+    returns = [],
+    discount,
+    discountPercent,
+    paidAmount = 0,
+    paymentMethod,
+    chequeBank,
+    chequeNo,
+    chequeDate
+  } = req.body;
   const order = await Order.findById(req.params.id);
 
   if (!order) {
@@ -409,11 +612,64 @@ const deliverOrder = async (req, res) => {
   if (missingItem) {
     return res.status(400).json({ message: "Delivered item does not exist in order" });
   }
-  const returnTotal = returns.reduce(
-    (sum, item) => sum + (item.returnTotal || item.quantity * item.returnPrice || 0),
-    0
-  );
-  const netTotal = Math.max(orderTotal - returnTotal - Number(discount || 0), 0);
+  // Normalize and strictly validate confirmed market returns
+  const validatedReturns = [];
+  for (const r of (returns || [])) {
+    const qty = Number(r.quantity || 0);
+    const price = Number(r.returnPrice || 0);
+
+    if (qty <= 0 || isNaN(qty)) {
+      return res.status(400).json({ message: `Invalid quantity for return item ${r.itemName || r.itemCode}.` });
+    }
+
+    if (price <= 0 || isNaN(price)) {
+      return res.status(400).json({ message: `Return unit price for ${r.itemName || r.itemCode} must be greater than zero.` });
+    }
+
+    // Valuation Policy: return price must not exceed catalogue selling price
+    if (r.productId || r.itemCode) {
+      const prod = r.productId 
+        ? await Product.findById(r.productId) 
+        : await Product.findOne({ itemCode: r.itemCode });
+      if (prod && typeof prod.currentSellingPrice === "number" && price > prod.currentSellingPrice) {
+        return res.status(400).json({
+          message: `Return unit price (Rs. ${price.toFixed(2)}) for "${prod.displayName || prod.productName}" cannot exceed catalogue selling price (Rs. ${prod.currentSellingPrice.toFixed(2)}).`
+        });
+      }
+    }
+
+    const itemReturnTotal = Math.round(qty * price * 100) / 100;
+
+    validatedReturns.push({
+      productId: r.productId,
+      itemCode: r.itemCode,
+      itemName: r.itemName,
+      quantity: qty,
+      returnPrice: price,
+      returnTotal: itemReturnTotal,
+      condition: r.condition || "resellable",
+      reason: r.reason || "Delivered market return",
+      originalInvoiceNo: r.originalInvoiceNo || ""
+    });
+  }
+
+  const returnTotal = validatedReturns.reduce((sum, item) => sum + item.returnTotal, 0);
+  if (returnTotal > orderTotal) {
+    return res.status(400).json({ message: "Return total cannot exceed order total" });
+  }
+  const baseTotal = Math.max(0, orderTotal - returnTotal);
+
+  const effectiveDiscountPercent =
+    discountPercent !== undefined && discountPercent !== null && discountPercent !== ""
+      ? Number(discountPercent)
+      : order.discountPercent !== undefined && order.discountPercent !== null
+      ? order.discountPercent
+      : order.orderTotal > 0 && order.discount
+      ? (order.discount / order.orderTotal) * 100
+      : 0;
+
+  const calculatedDiscount = Math.round((baseTotal * (effectiveDiscountPercent / 100)) * 100) / 100;
+  const netTotal = Math.max(0, baseTotal - calculatedDiscount);
   const numericPaid = Number(paidAmount || 0);
   const resolvedPaymentMethod = paymentMethod || "cash";
 
@@ -438,10 +694,14 @@ const deliverOrder = async (req, res) => {
 
     const sale = await createSaleFromPayload({
       items: deliveredItems,
-      returns,
+      returns: validatedReturns,
       discount,
+      discountPercent: effectiveDiscountPercent,
       paidAmount: numericPaid,
       paymentMethod: resolvedPaymentMethod,
+      chequeBank,
+      chequeNo,
+      chequeDate,
       customer: order.customer,
       saleType:
         order.customer && numericPaid > 0 && numericPaid < netTotal ? "credit" : "walk-in",
@@ -515,11 +775,18 @@ const deliverOrder = async (req, res) => {
     order.orderStatus = "delivered";
     order.paymentStatus = sale.paymentStatus;
     order.paymentMethod = resolvedPaymentMethod;
+    if (resolvedPaymentMethod === "cheque") {
+      order.chequeBank = chequeBank;
+      order.chequeNo = chequeNo;
+      if (chequeDate) order.chequeDate = new Date(chequeDate);
+    }
     order.deliveryDate = new Date();
     order.saleId = sale._id;
+    order.returns = validatedReturns;
     order.orderTotal = sale.orderTotal;
     order.returnTotal = sale.returnTotal;
     order.discount = sale.discount;
+    order.discountPercent = sale.discountPercent;
     order.netTotal = sale.netTotal;
     order.paidAmount = sale.paidAmount;
     order.dueAmount = sale.dueAmount;
@@ -528,7 +795,40 @@ const deliverOrder = async (req, res) => {
 
     return res.json({ order, sale });
   } catch (err) {
-    return res.status(400).json({ message: err.message || "Failed to deliver order" });
+    const status = err.status || err.statusCode || 400;
+    return res.status(status).json({
+      message: err.message || "Failed to deliver order",
+      itemCode: err.itemCode,
+      availableQuantity: err.availableQuantity,
+      requestedQuantity: err.requestedQuantity
+    });
+  }
+};
+
+const getOrderByIdempotencyKey = async (req, res) => {
+  const { key } = req.params;
+  if (!key || typeof key !== "string" || !key.trim()) {
+    return res.status(400).json({ message: "Idempotency key is required" });
+  }
+
+  try {
+    const order = await Order.findOne({ idempotencyKey: key.trim() })
+      .populate("customer", "name phone address customerType")
+      .populate("cashier", "name");
+
+    if (!order) {
+      return res.status(404).json({ message: "No order found for the provided idempotency key" });
+    }
+
+    if (req.user?.role === "rep" && order.cashier?._id?.toString() !== req.user?._id?.toString()) {
+      return res.status(403).json({ message: "Unauthorized access to order" });
+    }
+
+    return res.status(200).json(order);
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to query order by idempotency key" });
   }
 };
 
@@ -536,6 +836,7 @@ module.exports = {
   createOrder,
   listOrders,
   getOrder,
+  getOrderByIdempotencyKey,
   updateOrder,
   cancelOrder,
   deleteOrder,

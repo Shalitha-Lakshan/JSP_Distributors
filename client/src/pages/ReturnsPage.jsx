@@ -24,12 +24,19 @@ const supplierAddresses = {
 const ReturnsPage = () => {
   const [pendingReturns, setPendingReturns] = useState([]);
   const [dispatchHistory, setDispatchHistory] = useState([]);
+  const [pendingInspections, setPendingInspections] = useState([]);
+  const [inspectionHistory, setInspectionHistory] = useState([]);
+  const [inspectingReturn, setInspectingReturn] = useState(null);
+  const [inspectionForm, setInspectionForm] = useState({});
+  const [inspectionNotes, setInspectionNotes] = useState("");
+  const [submittingInspection, setSubmittingInspection] = useState(false);
+  const [inspectionSuccessMsg, setInspectionSuccessMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [conditionFilter, setConditionFilter] = useState("all");
   const [supplierFilter, setSupplierFilter] = useState("Ruhunu Foods"); // "Ruhunu Foods" | "Gajamuthu Foods"
-  const [activeTab, setActiveTab] = useState("pending"); // "pending" | "history"
+  const [activeTab, setActiveTab] = useState("inspection"); // "inspection" | "pending" | "history" | "inspection_history"
 
   // Checkbox selections for pending return items (stores unique key: returnId-itemCode-condition)
   const [selectedItemKeys, setSelectedItemKeys] = useState([]);
@@ -50,12 +57,16 @@ const ReturnsPage = () => {
     setLoading(true);
     setError("");
     try {
-      const [pendingRes, historyRes] = await Promise.all([
+      const [pendingRes, historyRes, pendingInspRes, inspHistRes] = await Promise.all([
         api.get("/api/returns/pending", { headers: authHeader }),
-        api.get("/api/returns/dispatched", { headers: authHeader })
+        api.get("/api/returns/dispatched", { headers: authHeader }),
+        api.get("/api/returns/pending-inspection", { headers: authHeader }),
+        api.get("/api/returns/inspections", { headers: authHeader })
       ]);
       setPendingReturns(pendingRes.data || []);
       setDispatchHistory(historyRes.data || []);
+      setPendingInspections(pendingInspRes.data || []);
+      setInspectionHistory(inspHistRes.data || []);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load returns data");
     } finally {
@@ -203,6 +214,82 @@ const ReturnsPage = () => {
     window.print();
   };
 
+  const handleOpenInspect = (ret) => {
+    setInspectingReturn(ret);
+    setInspectionNotes(ret.inspectionNotes || "");
+    const initial = {};
+    (ret.items || []).forEach((it) => {
+      const isResellable = it.condition === "resellable";
+      initial[it.itemCode] = {
+        approvedResellableQty: isResellable ? it.quantity : 0,
+        rejectedQty: isResellable ? 0 : it.quantity,
+        rejectionReason: isResellable ? "" : `Returned in ${it.condition} condition`
+      };
+    });
+    setInspectionForm(initial);
+  };
+
+  const handleItemQtyChange = (itemCode, field, val, maxQty) => {
+    const num = Math.max(0, Number(val) || 0);
+    setInspectionForm((prev) => {
+      const current = prev[itemCode] || { approvedResellableQty: 0, rejectedQty: 0, rejectionReason: "" };
+      const updated = { ...current };
+
+      if (field === "approved") {
+        const approved = Math.min(maxQty, num);
+        updated.approvedResellableQty = approved;
+        updated.rejectedQty = Math.max(0, maxQty - approved);
+      } else if (field === "rejected") {
+        const rejected = Math.min(maxQty, num);
+        updated.rejectedQty = rejected;
+        updated.approvedResellableQty = Math.max(0, maxQty - rejected);
+      } else if (field === "reason") {
+        updated.rejectionReason = val;
+      }
+      return { ...prev, [itemCode]: updated };
+    });
+  };
+
+  const handleConfirmInspection = async () => {
+    if (!inspectingReturn) return;
+    setSubmittingInspection(true);
+    setError("");
+    try {
+      const payloadInspections = (inspectingReturn.items || []).map((it) => {
+        const itemForm = inspectionForm[it.itemCode] || {
+          approvedResellableQty: 0,
+          rejectedQty: it.quantity,
+          rejectionReason: ""
+        };
+        return {
+          itemCode: it.itemCode,
+          approvedResellableQty: Number(itemForm.approvedResellableQty || 0),
+          rejectedQty: Number(itemForm.rejectedQty || 0),
+          rejectionReason: itemForm.rejectionReason
+        };
+      });
+
+      const res = await api.post(
+        `/api/returns/${inspectingReturn._id}/inspect`,
+        {
+          inspections: payloadInspections,
+          inspectionNotes
+        },
+        { headers: authHeader }
+      );
+
+      setInspectionSuccessMsg(
+        `Inspection saved! Restored ${res.data.newlyApprovedTotalQty} resellable units to active warehouse stock.`
+      );
+      setInspectingReturn(null);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to record return inspection");
+    } finally {
+      setSubmittingInspection(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       {/* Page Header */}
@@ -285,14 +372,22 @@ const ReturnsPage = () => {
       </div>
 
       {/* Tabs Layout */}
-      <div className="border-b border-slatewash flex gap-4">
+      <div className="border-b border-slatewash flex flex-wrap gap-4">
+        <button
+          onClick={() => setActiveTab("inspection")}
+          className={`pb-3 text-sm font-semibold relative transition ${
+            activeTab === "inspection" ? "text-ink border-b-2 border-ink" : "text-ink/50 hover:text-ink"
+          }`}
+        >
+          Warehouse Return Inspection ({pendingInspections.length})
+        </button>
         <button
           onClick={() => setActiveTab("pending")}
           className={`pb-3 text-sm font-semibold relative transition ${
             activeTab === "pending" ? "text-ink border-b-2 border-ink" : "text-ink/50 hover:text-ink"
           }`}
         >
-          Pending Customer Returns ({pendingReturns.length} Items Pool)
+          Supplier Dispatch Queue ({pendingReturns.length} Items Pool)
         </button>
         <button
           onClick={() => setActiveTab("history")}
@@ -302,11 +397,119 @@ const ReturnsPage = () => {
         >
           Supplier Dispatch History ({dispatchHistory.length})
         </button>
+        <button
+          onClick={() => setActiveTab("inspection_history")}
+          className={`pb-3 text-sm font-semibold relative transition ${
+            activeTab === "inspection_history" ? "text-ink border-b-2 border-ink" : "text-ink/50 hover:text-ink"
+          }`}
+        >
+          Inspection History ({inspectionHistory.length})
+        </button>
       </div>
+
+      {inspectionSuccessMsg && (
+        <div className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900 shadow-sm">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-emerald-600 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <span className="font-medium">{inspectionSuccessMsg}</span>
+          </div>
+          <button onClick={() => setInspectionSuccessMsg("")} className="font-bold text-xs uppercase text-emerald-700 hover:text-emerald-900">Dismiss</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="rounded-2xl bg-white/80 p-8 text-center text-sm text-ink/60 shadow">
           Loading returns information...
+        </div>
+      ) : activeTab === "inspection" ? (
+        /* WAREHOUSE RETURN INSPECTION TAB */
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-white/80 p-4 shadow flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-ink/70">
+              Customer returns collected from route trips. Inspect physical goods before approving resellable units into active sellable stock.
+            </p>
+            <span className="text-xs font-semibold text-ink bg-slatewash/60 px-3 py-1 rounded-full">
+              {pendingInspections.length} Returns Pending Inspection
+            </span>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl bg-white shadow">
+            <table className="w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-slatewash bg-slatewash/30 text-ink/60">
+                  <th className="p-4 font-semibold">Date</th>
+                  <th className="p-4 font-semibold">Invoice No</th>
+                  <th className="p-4 font-semibold">Customer / Rep</th>
+                  <th className="p-4 font-semibold">Trip / Route</th>
+                  <th className="p-4 font-semibold">Items Awaiting Check</th>
+                  <th className="p-4 font-semibold text-right">Return Value</th>
+                  <th className="p-4 font-semibold text-center">Status</th>
+                  <th className="p-4 font-semibold text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slatewash">
+                {pendingInspections.map((ret) => (
+                  <tr key={ret._id} className="transition hover:bg-slatewash/20">
+                    <td className="p-4">
+                      <div className="font-semibold text-ink">{formatDate(ret.createdAt)}</div>
+                    </td>
+                    <td className="p-4 font-mono font-semibold text-xs text-ink">
+                      {ret.invoiceNo}
+                    </td>
+                    <td className="p-4">
+                      <div className="font-semibold text-ink">{ret.customer?.name || "Customer"}</div>
+                      <div className="text-xs text-ink/50">Rep: {ret.cashier?.name || "Sales Rep"}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="font-semibold text-ink">{ret.tripId?.tripNo || "Field Return"}</div>
+                      <div className="text-xs text-ink/50">{ret.tripId?.route || "-"}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="space-y-1">
+                        {(ret.items || []).map((it, idx) => (
+                          <div key={idx} className="text-xs flex items-center gap-1.5">
+                            <span className="font-semibold text-ink">{it.quantity}x</span>
+                            <span>{it.itemName}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                              it.condition === "resellable" ? "bg-emerald-100 text-emerald-800" :
+                              it.condition === "damaged" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"
+                            }`}>
+                              {it.condition}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-4 text-right font-mono font-bold text-ink">
+                      {formatCurrency(ret.returnTotal)}
+                    </td>
+                    <td className="p-4 text-center">
+                      <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 animate-pulse">
+                        Pending Inspection
+                      </span>
+                    </td>
+                    <td className="p-4 text-center">
+                      <button
+                        onClick={() => handleOpenInspect(ret)}
+                        className="rounded-xl bg-ink px-3 py-1.5 text-xs font-semibold text-sand hover:bg-ink/90 transition shadow-sm"
+                      >
+                        Inspect Stock
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {pendingInspections.length === 0 && (
+                  <tr>
+                    <td colSpan="8" className="p-8 text-center text-ink/50">
+                      No returns currently pending warehouse inspection.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : activeTab === "pending" ? (
         <div className="space-y-4">
@@ -447,7 +650,7 @@ const ReturnsPage = () => {
             </table>
           </div>
         </div>
-      ) : (
+      ) : activeTab === "history" ? (
         /* Dispatch History Log */
         <div className="overflow-x-auto rounded-2xl bg-white shadow">
           <table className="w-full border-collapse text-left text-sm">
@@ -512,6 +715,183 @@ const ReturnsPage = () => {
               )}
             </tbody>
           </table>
+        </div>
+      ) : (
+        /* INSPECTION HISTORY TAB */
+        <div className="overflow-x-auto rounded-2xl bg-white shadow">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-slatewash bg-slatewash/30 text-ink/60">
+                <th className="p-4 font-semibold">Inspected Date</th>
+                <th className="p-4 font-semibold">Invoice No</th>
+                <th className="p-4 font-semibold">Customer</th>
+                <th className="p-4 font-semibold">Inspected By</th>
+                <th className="p-4 font-semibold">Inspection Result</th>
+                <th className="p-4 font-semibold">Restored Units</th>
+                <th className="p-4 font-semibold">Rejected Units</th>
+                <th className="p-4 font-semibold">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slatewash">
+              {inspectionHistory.map((ret) => {
+                const totalApproved = (ret.items || []).reduce((sum, i) => sum + (i.approvedResellableQty || 0), 0);
+                const totalRejected = (ret.items || []).reduce((sum, i) => sum + (i.rejectedQty || 0), 0);
+                return (
+                  <tr key={ret._id} className="hover:bg-slatewash/20 transition">
+                    <td className="p-4 font-medium text-ink">{formatDate(ret.inspectedAt || ret.updatedAt)}</td>
+                    <td className="p-4 font-mono font-semibold text-xs text-ink">{ret.invoiceNo}</td>
+                    <td className="p-4 font-medium text-ink">{ret.customer?.name || "Customer"}</td>
+                    <td className="p-4 text-ink/70">{ret.inspectedBy?.name || "Manager"}</td>
+                    <td className="p-4">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        ret.inspectionStatus === "approved" ? "bg-emerald-100 text-emerald-800" :
+                        ret.inspectionStatus === "rejected" ? "bg-red-100 text-red-800" :
+                        "bg-blue-100 text-blue-800"
+                      }`}>
+                        {ret.inspectionStatus}
+                      </span>
+                    </td>
+                    <td className="p-4 font-bold text-emerald-700">+{totalApproved} units</td>
+                    <td className="p-4 font-medium text-clay">{totalRejected} units</td>
+                    <td className="p-4 text-xs text-ink/60 italic">{ret.inspectionNotes || "-"}</td>
+                  </tr>
+                );
+              })}
+              {inspectionHistory.length === 0 && (
+                <tr>
+                  <td colSpan="8" className="p-8 text-center text-ink/50">
+                    No inspection history records found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* WAREHOUSE RETURN INSPECTION MODAL */}
+      {inspectingReturn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slatewash pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-ink">Warehouse Physical Stock Inspection</h3>
+                <p className="text-xs text-ink/50">
+                  Return Slip: <span className="font-mono font-bold text-ink">{inspectingReturn.invoiceNo}</span> • Customer: <span className="font-semibold text-ink">{inspectingReturn.customer?.name || "Customer"}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setInspectingReturn(null)}
+                className="text-ink/40 hover:text-ink text-xl font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+              {(inspectingReturn.items || []).map((item) => {
+                const itemForm = inspectionForm[item.itemCode] || {
+                  approvedResellableQty: 0,
+                  rejectedQty: 0,
+                  rejectionReason: ""
+                };
+                return (
+                  <div key={item.itemCode} className="rounded-xl border border-slatewash p-4 bg-slate-50 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="font-semibold text-ink text-sm">{item.itemName}</div>
+                        <div className="text-xs font-mono text-ink/50">{item.itemCode}</div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-ink">Returned Qty: {item.quantity}</span>
+                        <div className="text-[10px] text-ink/50 uppercase mt-0.5">
+                          Reported: <span className="font-bold">{item.condition}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slatewash">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                          Approved Resellable Qty
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.quantity}
+                          value={itemForm.approvedResellableQty}
+                          onChange={(e) => handleItemQtyChange(item.itemCode, "approved", e.target.value, item.quantity)}
+                          className="mt-1 w-full rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-sm font-bold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                        <span className="text-[10px] text-ink/40">Will be restored into active stock</span>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-clay">
+                          Rejected Qty (Damaged/Expired)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.quantity}
+                          value={itemForm.rejectedQty}
+                          onChange={(e) => handleItemQtyChange(item.itemCode, "rejected", e.target.value, item.quantity)}
+                          className="mt-1 w-full rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-bold text-red-900 focus:outline-none focus:ring-2 focus:ring-red-400"
+                        />
+                        <span className="text-[10px] text-ink/40">Excluded from sellable stock</span>
+                      </div>
+                    </div>
+
+                    {Number(itemForm.rejectedQty) > 0 && (
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-ink/50">
+                          Rejection Reason
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Broken seal, past expiry, carton damaged..."
+                          value={itemForm.rejectionReason}
+                          onChange={(e) => handleItemQtyChange(item.itemCode, "reason", e.target.value, item.quantity)}
+                          className="mt-1 w-full rounded-lg border border-slatewash bg-white px-3 py-1.5 text-xs text-ink focus:outline-none"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-ink/60 mb-1">
+                  Manager Inspection Comments / Notes
+                </label>
+                <textarea
+                  rows="2"
+                  placeholder="Add physical verification notes..."
+                  value={inspectionNotes}
+                  onChange={(e) => setInspectionNotes(e.target.value)}
+                  className="w-full rounded-xl border border-slatewash p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-ink/20"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-3 border-t border-slatewash">
+              <button
+                type="button"
+                onClick={() => setInspectingReturn(null)}
+                className="flex-1 rounded-xl border border-slatewash py-2.5 text-xs font-semibold text-ink hover:bg-slatewash/30 transition"
+                disabled={submittingInspection}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmInspection}
+                disabled={submittingInspection}
+                className="flex-1 rounded-xl bg-ink py-2.5 text-xs font-semibold text-sand hover:bg-ink/90 transition shadow disabled:opacity-50"
+              >
+                {submittingInspection ? "Recording Inspection..." : "Approve & Restore Stock"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

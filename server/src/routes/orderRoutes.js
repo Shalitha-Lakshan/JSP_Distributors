@@ -3,6 +3,7 @@ const {
   createOrder,
   listOrders,
   getOrder,
+  getOrderByIdempotencyKey,
   updateOrder,
   cancelOrder,
   deliverOrder,
@@ -14,6 +15,7 @@ const router = express.Router();
 
 router.get("/", requireAuth, listOrders);
 router.post("/", requireAuth, requireRole(["admin", "manager", "rep"]), createOrder);
+router.get("/by-idempotency/:key", requireAuth, getOrderByIdempotencyKey);
 router.get("/:id", requireAuth, getOrder);
 router.put("/:id", requireAuth, requireRole(["admin", "manager", "rep"]), updateOrder);
 router.patch("/:id/cancel", requireAuth, cancelOrder);

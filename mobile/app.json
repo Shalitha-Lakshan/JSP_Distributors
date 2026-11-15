@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "JSP Distributors",
+    "slug": "jsp-distributors-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/logo.png",
+    "scheme": "jspdistributors",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#0f766e"
+      },
+      "package": "com.jspdistributors.sales",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0f766e",
+          "image": "./assets/logo.png",
+          "imageWidth": 120
+        }
+      ],
+      "expo-sharing"
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 const TripSession = require("../models/TripSession");
+const Return = require("../models/Return");
 
 // POST /api/trips/start
 const startTrip = async (req, res) => {
@@ -60,36 +61,108 @@ const getActiveTrip = async (req, res) => {
 
 // POST /api/trips/submit-audit
 const submitAudit = async (req, res) => {
-  const { actualCollections = { cash: 0, cheque: 0 } } = req.body;
+  const { actualCollections = { cash: 0, cheque: 0 }, remarks } = req.body;
 
   try {
-    const trip = await TripSession.findOne({
+    let trip = await TripSession.findOne({
       rep: req.user._id,
       status: "active"
     });
 
     if (!trip) {
+      // Graceful duplicate/retry recovery: check if already submitted
+      const pendingTrip = await TripSession.findOne({
+        rep: req.user._id,
+        status: "pending_audit"
+      }).sort({ updatedAt: -1 });
+
+      if (pendingTrip) {
+        return res.json({
+          ...pendingTrip.toObject(),
+          alreadySubmitted: true,
+          message: "Trip session has already been submitted for manager audit."
+        });
+      }
+
       return res.status(404).json({ message: "No active trip session found." });
     }
 
-    const expectedCash = Number(trip.expectedCollections?.cash || 0);
+    const rawActualCash = Number(actualCollections.cash);
+    const rawActualCheque = Number(actualCollections.cheque);
+
+    if (
+      isNaN(rawActualCash) ||
+      rawActualCash < 0 ||
+      isNaN(rawActualCheque) ||
+      rawActualCheque < 0
+    ) {
+      return res.status(400).json({
+        message: "Actual collections must be valid non-negative numbers."
+      });
+    }
+
+    const actualCash = Math.round(rawActualCash * 100) / 100;
+    const actualCheque = Math.round(rawActualCheque * 100) / 100;
+
+    const totalExpenses = (trip.expenses || []).reduce(
+      (sum, e) => sum + (Number(e.amount) || 0),
+      0
+    );
+    const expectedCashGross = Number(trip.expectedCollections?.cash || 0);
+    const expectedCashNet = Math.max(0, expectedCashGross - totalExpenses);
     const expectedCheque = Number(trip.expectedCollections?.cheque || 0);
 
-    const actualCash = Number(actualCollections.cash || 0);
-    const actualCheque = Number(actualCollections.cheque || 0);
+    const cashVariance = Math.round((actualCash - expectedCashNet) * 100) / 100;
+    const chequeVariance = Math.round((actualCheque - expectedCheque) * 100) / 100;
+
+    // Policy 1: Cash Shortage Remarks Validation
+    // Cash shortage of Rs. 1,000 or more strictly requires explanatory remarks
+    const trimmedRemarks = remarks ? String(remarks).trim() : "";
+    if (cashVariance <= -1000 && !trimmedRemarks) {
+      return res.status(400).json({
+        message: "Sales Representative explanation is mandatory for cash shortages of Rs. 1,000 or more."
+      });
+    }
 
     trip.actualCollections = { cash: actualCash, cheque: actualCheque };
     trip.varianceCollections = {
-      cash: actualCash - expectedCash,
-      cheque: actualCheque - expectedCheque
+      cash: cashVariance,
+      cheque: chequeVariance
     };
+    trip.repRemarks = trimmedRemarks;
+
+    // Policy 2: Unreconciled Excess Cash
+    // If cash variance is positive, flag as unreconciled excess for Manager review
+    // without automatically creating ledger/credit entries
+    if (cashVariance > 0) {
+      trip.excessHandling = {
+        status: "unreconciled",
+        reviewNotes: ""
+      };
+    } else {
+      trip.excessHandling = {
+        status: "none"
+      };
+    }
 
     trip.status = "pending_audit";
     trip.endTime = new Date();
 
     await trip.save();
 
-    return res.json(trip);
+    const populated = await TripSession.findById(trip._id)
+      .populate("rep", "name email role")
+      .populate("auditedBy", "name")
+      .populate({
+        path: "ordersBooked",
+        populate: { path: "customer", select: "name" }
+      })
+      .populate({
+        path: "paymentsCollected",
+        populate: { path: "customer", select: "name" }
+      });
+
+    return res.json(populated);
   } catch (err) {
     return res.status(500).json({ message: err.message || "Failed to submit trip for audit" });
   }
@@ -114,6 +187,13 @@ const approveTrip = async (req, res) => {
     trip.auditedBy = req.user._id;
     trip.auditedAt = new Date();
     trip.auditNotes = auditNotes || "";
+
+    if (trip.excessHandling && trip.excessHandling.status === "unreconciled") {
+      trip.excessHandling.status = "reviewed";
+      trip.excessHandling.reviewedBy = req.user._id;
+      trip.excessHandling.reviewedAt = new Date();
+      trip.excessHandling.reviewNotes = auditNotes || "Reviewed during manager trip audit";
+    }
 
     await trip.save();
 
@@ -174,7 +254,14 @@ const getTripDetails = async (req, res) => {
       return res.status(403).json({ message: "Access forbidden" });
     }
 
-    return res.json(trip);
+    const returns = await Return.find({ tripId: trip._id })
+      .populate("customer", "name")
+      .populate("items.productId", "displayName itemCode");
+
+    return res.json({
+      ...trip.toObject(),
+      returns
+    });
   } catch (err) {
     return res.status(500).json({ message: err.message || "Failed to get trip details" });
   }

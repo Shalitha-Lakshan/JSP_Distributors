@@ -2,13 +2,46 @@ const express = require("express");
 const {
   getPendingReturns,
   getDispatchHistory,
-  dispatchToSupplier
+  dispatchToSupplier,
+  createCustomerReturn,
+  getCustomerReturns,
+  getEligibleInvoices,
+  getPendingInspectionReturns,
+  inspectReturn,
+  getInspectionHistory
 } = require("../controllers/returnController");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-// All return routes require authentication and manager or admin roles
+// Sales Rep & Field Returns
+router.get("/", requireAuth, getCustomerReturns);
+router.post("/", requireAuth, createCustomerReturn);
+router.get("/eligible-invoices/:customerId", requireAuth, getEligibleInvoices);
+
+// Warehouse Inspection Workflow (Manager / Admin only)
+router.get(
+  "/pending-inspection",
+  requireAuth,
+  requireRole(["admin", "manager"]),
+  getPendingInspectionReturns
+);
+
+router.get(
+  "/inspections",
+  requireAuth,
+  requireRole(["admin", "manager"]),
+  getInspectionHistory
+);
+
+router.post(
+  "/:id/inspect",
+  requireAuth,
+  requireRole(["admin", "manager"]),
+  inspectReturn
+);
+
+// Admin / Manager Supplier Dispatches
 router.get(
   "/pending",
   requireAuth,

@@ -53,6 +53,7 @@ const orderSchema = new mongoose.Schema(
     orderTotal: { type: Number, required: true, min: 0 },
     returnTotal: { type: Number, default: 0, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
+    discountPercent: { type: Number, default: 0, min: 0, max: 100 },
     netTotal: { type: Number, required: true, min: 0 },
     paidAmount: { type: Number, default: 0, min: 0 },
     dueAmount: { type: Number, default: 0, min: 0 },
@@ -71,10 +72,14 @@ const orderSchema = new mongoose.Schema(
       enum: ["cash", "credit", "cheque", "not_collected"],
       default: "not_collected"
     },
+    chequeBank: { type: String, trim: true },
+    chequeNo: { type: String, trim: true },
+    chequeDate: { type: Date },
     stockReserved: { type: Boolean, default: false },
     deliveryDate: { type: Date },
     saleId: { type: mongoose.Schema.Types.ObjectId, ref: "Sale" },
-    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" }
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" },
+    idempotencyKey: { type: String, unique: true, sparse: true, trim: true }
   },
   { timestamps: true }
 );

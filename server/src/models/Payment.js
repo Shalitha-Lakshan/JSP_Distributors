@@ -22,7 +22,8 @@ const paymentSchema = new mongoose.Schema(
     receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     note: { type: String, trim: true },
     allocations: { type: [allocationSchema], default: [] },
-    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" }
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" },
+    idempotencyKey: { type: String, unique: true, sparse: true, trim: true }
   },
   { timestamps: true }
 );

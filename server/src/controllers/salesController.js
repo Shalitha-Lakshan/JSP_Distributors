@@ -10,8 +10,12 @@ const createSale = async (req, res) => {
     items = [],
     returns = [],
     discount = 0,
+    discountPercent,
     paidAmount = 0,
     paymentMethod = "cash",
+    chequeBank,
+    chequeNo,
+    chequeDate,
     customer,
     saleType = "walk-in"
   } = req.body;
@@ -28,8 +32,12 @@ const createSale = async (req, res) => {
       items,
       returns,
       discount,
+      discountPercent,
       paidAmount,
       paymentMethod,
+      chequeBank,
+      chequeNo,
+      chequeDate,
       customer,
       saleType,
       cashierId: req.user?._id,
@@ -83,7 +91,13 @@ const createSale = async (req, res) => {
 
     return res.status(201).json(sale);
   } catch (err) {
-    return res.status(400).json({ message: err.message || "Failed to complete sale" });
+    const status = err.status || err.statusCode || 400;
+    return res.status(status).json({
+      message: err.message || "Failed to complete sale",
+      itemCode: err.itemCode,
+      availableQuantity: err.availableQuantity,
+      requestedQuantity: err.requestedQuantity
+    });
   }
 };
 
@@ -106,14 +120,18 @@ const listSales = async (req, res) => {
   }
 
   const sales = await Sale.find(filter)
-    .populate("customer", "name")
+    .populate("customer", "name phone address customerType")
     .populate("cashier", "name")
+    .populate("tripId", "route")
     .sort({ createdAt: -1 });
   return res.json(sales);
 };
 
 const getSale = async (req, res) => {
-  const sale = await Sale.findById(req.params.id);
+  const sale = await Sale.findById(req.params.id)
+    .populate("customer", "name phone address customerType")
+    .populate("cashier", "name")
+    .populate("tripId", "route");
   if (!sale) {
     return res.status(404).json({ message: "Sale not found" });
   }
@@ -121,7 +139,10 @@ const getSale = async (req, res) => {
 };
 
 const getSaleByInvoice = async (req, res) => {
-  const sale = await Sale.findOne({ invoiceNo: req.params.invoiceNo });
+  const sale = await Sale.findOne({ invoiceNo: req.params.invoiceNo })
+    .populate("customer", "name phone address customerType")
+    .populate("cashier", "name")
+    .populate("tripId", "route");
   if (!sale) {
     return res.status(404).json({ message: "Sale not found" });
   }

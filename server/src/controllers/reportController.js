@@ -1,5 +1,6 @@
 const Sale = require("../models/Sale");
 const Payment = require("../models/Payment");
+const Order = require("../models/Order");
 const Customer = require("../models/Customer");
 const Product = require("../models/Product");
 const StockBatch = require("../models/StockBatch");
@@ -14,15 +15,25 @@ const getDailyClosing = async (req, res) => {
     let activeTrip = null;
 
     if (tripIdParam) {
-      activeTrip = await TripSession.findById(tripIdParam);
+      activeTrip = await TripSession.findById(tripIdParam).populate("rep", "name");
     } else if (req.user?.role === "rep") {
       activeTrip = await TripSession.findOne({
         rep: req.user._id,
         status: "active"
-      });
+      }).populate("rep", "name");
+
+      // If no active trip, check for the most recently submitted pending_audit trip
+      if (!activeTrip) {
+        activeTrip = await TripSession.findOne({
+          rep: req.user._id,
+          status: "pending_audit"
+        })
+          .sort({ updatedAt: -1 })
+          .populate("rep", "name");
+      }
     }
 
-    // A. Active Trip Session Scoped
+    // A. Active or Pending-Audit Trip Session Scoped
     if (activeTrip || (req.user?.role === "rep" && !activeTrip)) {
       if (!activeTrip) {
         return res.json({
@@ -34,41 +45,125 @@ const getDailyClosing = async (req, res) => {
           discounts: 0,
           netCashCollection: 0,
           tripNo: "-",
-          route: "-"
+          route: "-",
+          status: "none"
         });
       }
 
-      const [summary] = await Sale.aggregate([
-        {
-          $match: {
-            tripId: activeTrip._id,
-            status: { $ne: "cancelled" }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            grossSales: { $sum: "$orderTotal" },
-            returns: { $sum: "$returnTotal" },
-            discounts: { $sum: "$discount" },
-            netSales: { $sum: "$netTotal" }
+      // 1. Sales summary
+      const sales = await Sale.find({
+        tripId: activeTrip._id,
+        status: { $ne: "cancelled" }
+      });
+
+      const totalInvoices = sales.length;
+      const grossSales = sales.reduce((sum, s) => sum + (s.orderTotal || 0), 0);
+      const saleReturns = sales.reduce((sum, s) => sum + (s.returnTotal || 0), 0);
+      const discounts = sales.reduce((sum, s) => sum + (s.discount || 0), 0);
+
+      // 2. Returns summary (POS-time returns and standalone field returns)
+      const returnsDoc = await Return.find({ tripId: activeTrip._id });
+      const totalReturns = returnsDoc.length > 0
+        ? returnsDoc.reduce((sum, r) => sum + (r.returnTotal || 0), 0)
+        : saleReturns;
+
+      const netSales = Math.max(0, grossSales - totalReturns - discounts);
+
+      // 3. Orders summary
+      const orders = await Order.find({
+        tripId: activeTrip._id,
+        orderStatus: { $ne: "cancelled" }
+      });
+      const totalOrders = orders.length;
+
+      // 4. Payments breakdown & Cheques list
+      const payments = await Payment.find({ tripId: activeTrip._id })
+        .populate("customer", "name");
+
+      let posCash = 0;
+      let posCheque = 0;
+      let deliveryCash = 0;
+      let deliveryCheque = 0;
+      let creditCash = 0;
+      let creditCheque = 0;
+      const chequesList = [];
+
+      payments.forEach((p) => {
+        const isCash = p.paymentMethod === "cash";
+        const isCheque = p.paymentMethod === "cheque";
+        const amt = Number(p.amount) || 0;
+
+        if (isCheque) {
+          chequesList.push({
+            paymentNo: p.paymentNo,
+            customerName: p.customer?.name || "Customer",
+            chequeNo: p.chequeNo || "-",
+            bankName: p.bankName || "-",
+            chequeDate: p.chequeDate,
+            amount: amt
+          });
+        }
+
+        const firstAlloc = p.allocations?.[0];
+        if (firstAlloc) {
+          const matchedSale = sales.find((s) => s.invoiceNo === firstAlloc.invoiceNo);
+          if (matchedSale) {
+            if (matchedSale.orderId) {
+              if (isCash) deliveryCash += amt;
+              else if (isCheque) deliveryCheque += amt;
+            } else {
+              if (isCash) posCash += amt;
+              else if (isCheque) posCheque += amt;
+            }
+            return;
           }
         }
-      ]);
 
-      const expenses = (activeTrip.expenses || []).reduce((sum, e) => sum + e.amount, 0);
-      const netCashCollection = (activeTrip.expectedCollections?.cash || 0) - expenses;
+        if (isCash) creditCash += amt;
+        else if (isCheque) creditCheque += amt;
+      });
+
+      const expenses = (activeTrip.expenses || []).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      const expectedCashGross = Number(activeTrip.expectedCollections?.cash || 0);
+      const expectedCheque = Number(activeTrip.expectedCollections?.cheque || 0);
+      const expectedCashNet = Math.max(0, expectedCashGross - expenses);
 
       return res.json({
-        date: activeTrip.createdAt,
-        grossSales: summary?.grossSales || 0,
-        returns: summary?.returns || 0,
-        expenses,
-        netSales: summary?.netSales || 0,
-        discounts: summary?.discounts || 0,
-        netCashCollection,
+        tripId: activeTrip._id,
         tripNo: activeTrip.tripNo,
-        route: activeTrip.route
+        route: activeTrip.route,
+        status: activeTrip.status,
+        startTime: activeTrip.startTime,
+        endTime: activeTrip.endTime,
+        repName: activeTrip.rep?.name || req.user?.name || "Sales Representative",
+        totalInvoices,
+        totalOrders,
+        grossSales,
+        returns: totalReturns,
+        discounts,
+        netSales,
+        expenses,
+        expensesList: activeTrip.expenses || [],
+        netCashCollection: expectedCashNet,
+        expectedCollections: {
+          cash: expectedCashNet,
+          cashGross: expectedCashGross,
+          cheque: expectedCheque,
+          total: expectedCashNet + expectedCheque
+        },
+        collectionsBreakdown: {
+          posSales: { cash: posCash, cheque: posCheque, total: posCash + posCheque },
+          orderDeliveries: { cash: deliveryCash, cheque: deliveryCheque, total: deliveryCash + deliveryCheque },
+          creditPayments: { cash: creditCash, cheque: creditCheque, total: creditCash + creditCheque },
+          totalCash: expectedCashGross,
+          totalCheque: expectedCheque
+        },
+        chequesList,
+        actualCollections: activeTrip.actualCollections || { cash: 0, cheque: 0 },
+        varianceCollections: activeTrip.varianceCollections || { cash: 0, cheque: 0 },
+        auditedBy: activeTrip.auditedBy,
+        auditedAt: activeTrip.auditedAt,
+        auditNotes: activeTrip.auditNotes
       });
     }
 

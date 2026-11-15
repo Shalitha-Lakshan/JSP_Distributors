@@ -536,10 +536,38 @@ const TripManagementPage = () => {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Policy 1: Sales Rep Shortage Explanation Card */}
+                  {selectedTrip.repRemarks && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px] text-amber-800">
+                        {SVGIcons.warning} Sales Representative Handover Explanation
+                      </div>
+                      <div className="text-ink font-semibold text-sm">"{selectedTrip.repRemarks}"</div>
+                      {Number(selectedTrip.varianceCollections?.cash || 0) <= -1000 && (
+                        <div className="text-[10px] text-amber-700 font-medium">
+                          * Explanation declared by rep for cash shortage of {formatCurrency(Math.abs(selectedTrip.varianceCollections?.cash))}.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Policy 2: Unreconciled Excess Cash Notice */}
+                  {Number(selectedTrip.varianceCollections?.cash || 0) > 0 && (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px] text-blue-800">
+                        Unreconciled Cash Excess ({formatCurrency(selectedTrip.varianceCollections?.cash)})
+                      </div>
+                      <div className="text-blue-950 font-medium">
+                        Status: {selectedTrip.excessHandling?.status === "reviewed" ? "Reviewed by Manager" : "Pending Manager Physical Verification"}.
+                        This positive cash variance has not been automatically credited to any customer ledger or miscellaneous income account.
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Lists of booked orders/payments/expenses */}
-                <div className="grid gap-6 md:grid-cols-3">
+                {/* Lists of booked orders/payments/returns/expenses */}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                   {/* Booked orders */}
                   <div className="space-y-3">
                     <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink/50">Orders Booked ({selectedTrip.ordersBooked?.length || 0})</h4>
@@ -574,6 +602,40 @@ const TripManagementPage = () => {
                       ))}
                       {!selectedTrip.paymentsCollected?.length && (
                         <div className="text-center py-8 text-xs text-ink/40">No payments collected.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Field Returns */}
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-ink/50">Field Returns ({(selectedTrip.returns || []).length})</h4>
+                    <div className="max-h-[240px] overflow-y-auto rounded-xl border border-slatewash p-2.5 space-y-2 bg-slate-50">
+                      {(selectedTrip.returns || []).map((ret) => (
+                        <div key={ret._id} className="text-xs bg-white border border-slatewash p-2.5 rounded-lg shadow-sm space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-semibold text-ink">Inv: {ret.invoiceNo}</div>
+                              <div className="text-[10px] text-ink/50 mt-0.5">{ret.customer?.name || "Customer"}</div>
+                            </div>
+                            <div className="font-bold text-amber-600">{formatCurrency(ret.returnTotal)}</div>
+                          </div>
+                          <div className="flex items-center justify-between pt-1 border-t border-slatewash text-[10px]">
+                            <span className="text-ink/60">{(ret.items || []).length} items</span>
+                            <span className={`px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                              ret.inspectionStatus === "approved" ? "bg-leaf/10 text-leaf" :
+                              ret.inspectionStatus === "rejected" ? "bg-clay/10 text-clay" :
+                              ret.inspectionStatus === "partially_approved" ? "bg-blue-100 text-blue-700" :
+                              "bg-amber-100 text-amber-800 animate-pulse"
+                            }`}>
+                              {ret.inspectionStatus === "approved" ? "Inspected" :
+                               ret.inspectionStatus === "rejected" ? "Rejected" :
+                               ret.inspectionStatus === "partially_approved" ? "Partially Approved" : "Pending Inspection"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      {!(selectedTrip.returns || []).length && (
+                        <div className="text-center py-8 text-xs text-ink/40">No returns recorded.</div>
                       )}
                     </div>
                   </div>

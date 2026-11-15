@@ -32,6 +32,17 @@ const tripSessionSchema = new mongoose.Schema(
         amount: { type: Number, required: true, min: 0 }
       }
     ],
+    repRemarks: { type: String, trim: true, default: "" },
+    excessHandling: {
+      status: {
+        type: String,
+        enum: ["none", "unreconciled", "reviewed"],
+        default: "none"
+      },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      reviewedAt: { type: Date },
+      reviewNotes: { type: String, trim: true }
+    },
     auditedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     auditedAt: { type: Date },
     auditNotes: { type: String, trim: true }

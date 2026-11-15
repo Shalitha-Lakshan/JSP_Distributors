@@ -7,8 +7,12 @@ const createSaleFromPayload = async ({
   items = [],
   returns = [],
   discount = 0,
+  discountPercent,
   paidAmount = 0,
   paymentMethod = "cash",
+  chequeBank,
+  chequeNo,
+  chequeDate,
   customer,
   saleType = "walk-in",
   cashierId,
@@ -82,6 +86,19 @@ const createSaleFromPayload = async ({
       remainingQty: { $gt: 0 }
     }).sort({ receivedDate: 1 });
 
+    const totalBatchAvailable = batches.reduce((sum, b) => sum + Number(b.remainingQty || 0), 0);
+    if (totalBatchAvailable < qtyNeeded) {
+      const err = new Error(
+        `Insufficient stock for ${product.itemCode} (${product.displayName || product.productName}). Available: ${totalBatchAvailable}, requested: ${qtyNeeded}`
+      );
+      err.status = 409;
+      err.statusCode = 409;
+      err.itemCode = product.itemCode;
+      err.availableQuantity = totalBatchAvailable;
+      err.requestedQuantity = qtyNeeded;
+      throw err;
+    }
+
     let remaining = qtyNeeded;
     const usedBatches = [];
     let billingTotal = 0;
@@ -109,15 +126,21 @@ const createSaleFromPayload = async ({
       });
 
       batchUpdates.push({
-        updateOne: {
-          filter: { _id: batch._id },
-          update: { $inc: { remainingQty: -takeQty } }
-        }
+        batchId: batch._id,
+        takeQty
       });
     }
 
     if (remaining > 0) {
-      throw new Error("Insufficient stock for item");
+      const err = new Error(
+        `Insufficient stock for ${product.itemCode} (${product.displayName || product.productName}). Available: ${qtyNeeded - remaining}, requested: ${qtyNeeded}`
+      );
+      err.status = 409;
+      err.statusCode = 409;
+      err.itemCode = product.itemCode;
+      err.availableQuantity = qtyNeeded - remaining;
+      err.requestedQuantity = qtyNeeded;
+      throw err;
     }
 
     normalizedItems.push({
@@ -137,14 +160,61 @@ const createSaleFromPayload = async ({
     );
   }
 
-  if (batchUpdates.length > 0 && !skipBatchUpdate) {
-    await StockBatch.bulkWrite(batchUpdates);
-  }
+  // Atomic conditional stock deductions with rollback protection against race conditions
+  const appliedBatchDeductions = [];
+  const appliedProductDeductions = [];
 
-  if (!skipProductStockUpdate) {
-    for (const [productId, qty] of productStockUpdates.entries()) {
-      await Product.findByIdAndUpdate(productId, { $inc: { totalStock: -qty } });
+  try {
+    if (batchUpdates.length > 0 && !skipBatchUpdate) {
+      for (const update of batchUpdates) {
+        const updatedBatch = await StockBatch.findOneAndUpdate(
+          { _id: update.batchId, remainingQty: { $gte: update.takeQty } },
+          { $inc: { remainingQty: -update.takeQty } },
+          { new: true }
+        );
+
+        if (!updatedBatch) {
+          const err = new Error(
+            "Stock conflict: Available units were claimed by another transaction during processing. Please refresh and retry."
+          );
+          err.status = 409;
+          err.statusCode = 409;
+          throw err;
+        }
+
+        appliedBatchDeductions.push(update);
+      }
     }
+
+    if (!skipProductStockUpdate) {
+      for (const [productId, qty] of productStockUpdates.entries()) {
+        const updatedProd = await Product.findOneAndUpdate(
+          { _id: productId, totalStock: { $gte: qty } },
+          { $inc: { totalStock: -qty } },
+          { new: true }
+        );
+
+        if (!updatedProd) {
+          const err = new Error(
+            "Product stock conflict: Insufficient total stock remaining. Please refresh catalogue."
+          );
+          err.status = 409;
+          err.statusCode = 409;
+          throw err;
+        }
+
+        appliedProductDeductions.push({ productId, qty });
+      }
+    }
+  } catch (err) {
+    // Rollback any batches successfully deducted before collision
+    for (const ded of appliedBatchDeductions) {
+      await StockBatch.findByIdAndUpdate(ded.batchId, { $inc: { remainingQty: ded.takeQty } });
+    }
+    for (const ded of appliedProductDeductions) {
+      await Product.findByIdAndUpdate(ded.productId, { $inc: { totalStock: ded.qty } });
+    }
+    throw err;
   }
 
   const orderTotal = normalizedItems.reduce((sum, item) => sum + (item.lineTotal || 0), 0);
@@ -157,7 +227,21 @@ const createSaleFromPayload = async ({
     throw new Error("Return total cannot exceed order total");
   }
 
-  const netTotal = Math.max(orderTotal - returnTotal - discount, 0);
+  const baseTotal = Math.max(orderTotal - returnTotal, 0);
+
+  // Authoritative percentage and monetary discount calculation
+  let finalDiscount = 0;
+  let finalDiscountPercent = 0;
+
+  if (discountPercent !== undefined && discountPercent !== null && discountPercent !== "") {
+    finalDiscountPercent = Math.min(100, Math.max(0, Number(discountPercent || 0)));
+    finalDiscount = Math.round((baseTotal * (finalDiscountPercent / 100)) * 100) / 100;
+  } else if (discount !== undefined && discount !== null) {
+    finalDiscount = Math.min(baseTotal, Math.max(0, Number(discount || 0)));
+    finalDiscountPercent = baseTotal > 0 ? Math.round((finalDiscount / baseTotal) * 10000) / 100 : 0;
+  }
+
+  const netTotal = Math.max(baseTotal - finalDiscount, 0);
   const dueAmount = Math.max(netTotal - paidAmount, 0);
   const balance = Math.max(paidAmount - netTotal, 0);
 
@@ -177,53 +261,55 @@ const createSaleFromPayload = async ({
     orderTotal,
     returnTotal,
     subtotal: orderTotal,
-    discount,
+    discount: finalDiscount,
+    discountPercent: finalDiscountPercent,
     netTotal,
     paidAmount,
     dueAmount,
     balance,
     paymentMethod,
+    chequeBank: paymentMethod === "cheque" ? chequeBank : undefined,
+    chequeNo: paymentMethod === "cheque" ? chequeNo : undefined,
+    chequeDate: paymentMethod === "cheque" && chequeDate ? new Date(chequeDate) : undefined,
     paymentStatus,
     saleType
   });
 
   if (returns.length > 0) {
+    const returnItems = returns.map((item) => ({
+      productId: item.productId,
+      itemCode: item.itemCode,
+      itemName: item.itemName,
+      quantity: item.quantity,
+      returnPrice: item.returnPrice,
+      returnTotal: item.returnTotal || (item.quantity * item.returnPrice),
+      condition: item.condition || "resellable",
+      reason: item.reason || "POS return",
+      originalInvoiceNo: item.originalInvoiceNo || sale.invoiceNo,
+      status: "pending",
+      inspectionStatus: "pending_inspection",
+      approvedResellableQty: 0,
+      rejectedQty: 0
+    }));
+
     await Return.create({
       saleId: sale._id,
       invoiceNo: sale.invoiceNo,
       customer,
       cashier: cashierId,
-      items: returns,
-      returnTotal
+      tripId: sale.tripId,
+      items: returnItems,
+      returnTotal,
+      status: "pending",
+      inspectionStatus: "pending_inspection"
     });
-
-    const resellableReturns = returns.filter(
-      (item) => item.condition === "resellable" && item.productId
-    );
-
-    await Promise.all(
-      resellableReturns.map(async (item) => {
-        const product = await Product.findById(item.productId);
-        if (!product) {
-          return;
-        }
-
-        product.totalStock += item.quantity;
-        await product.save();
-
-        await StockBatch.create({
-          productId: product._id,
-          batchNo: `R-${Date.now()}-${item.itemCode}`,
-          billingPrice: item.returnPrice,
-          sellingPrice: product.currentSellingPrice,
-          quantity: item.quantity,
-          remainingQty: item.quantity,
-          receivedDate: new Date(),
-          createdBy: cashierId
-        });
-      })
-    );
   }
+
+  await sale.populate([
+    { path: "customer", select: "name phone address customerType" },
+    { path: "cashier", select: "name" },
+    { path: "tripId", select: "route" }
+  ]);
 
   return sale;
 };
