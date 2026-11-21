@@ -8,16 +8,26 @@ const {
   getEligibleInvoices,
   getPendingInspectionReturns,
   inspectReturn,
-  getInspectionHistory
+  getInspectionHistory,
+  getReturnsSummary,
+  getMonthlySupplierSummary,
+  receiveReturnsAtWarehouse
 } = require("../controllers/returnController");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
+// Summaries & Aggregations
+router.get("/summary", requireAuth, getReturnsSummary);
+router.get("/monthly-supplier-summary", requireAuth, getMonthlySupplierSummary);
+
 // Sales Rep & Field Returns
 router.get("/", requireAuth, getCustomerReturns);
 router.post("/", requireAuth, createCustomerReturn);
 router.get("/eligible-invoices/:customerId", requireAuth, getEligibleInvoices);
+
+// Warehouse Handover (Warehouse, Manager, Admin, Rep)
+router.post("/:id/receive", requireAuth, receiveReturnsAtWarehouse);
 
 // Warehouse Inspection Workflow (Manager / Admin only)
 router.get(

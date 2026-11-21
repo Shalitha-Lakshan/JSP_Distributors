@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import {
+  ArrowLeft,
   CheckCircle,
   ChevronRight,
   Globe,
@@ -84,6 +85,20 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
+      {/* Top Header Bar */}
+      <View style={[styles.topHeader, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Home"
+        >
+          <ArrowLeft size={22} color={theme.textPrimary} />
+        </TouchableOpacity>
+        <Text style={[styles.topHeaderTitle, { color: theme.textPrimary }]}>Profile & Settings</Text>
+        <View style={{ width: 36 }} />
+      </View>
+
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
@@ -314,6 +329,22 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background
+  },
+  topHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.base,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1
+  },
+  backButton: {
+    padding: Spacing.xs,
+    borderRadius: BorderRadius.md
+  },
+  topHeaderTitle: {
+    fontSize: Typography.lg,
+    fontWeight: "700"
   },
   scrollContent: {
     padding: Spacing.base,

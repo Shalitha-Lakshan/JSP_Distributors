@@ -359,6 +359,10 @@ export interface Order {
   chequeNo?: string;
   chequeDate?: string;
   stockReserved: boolean;
+  packingStatus?: "not_started" | "packing" | "packed";
+  cancellationReason?: string;
+  cancelledBy?: string | User;
+  cancelledAt?: string;
   deliveryDate?: string;
   saleId?: string | Sale;
   tripId?: string | TripSession;
@@ -464,9 +468,11 @@ export interface Payment {
 // -------------------------------------------------------------
 
 export type ReturnCondition = "resellable" | "damaged" | "expired";
+export type ReturnHandoverStatus = "pending_handover" | "partially_received" | "received";
+export type ReturnInspectionStatus = "pending_inspection" | "partially_approved" | "approved" | "rejected";
 
 export interface CustomerReturnItem {
-  productId?: string | Product;
+  productId?: string | Product | { _id: string; displayName?: string; itemCode?: string; supplier?: string; currentBillingPrice?: number; currentSellingPrice?: number };
   itemCode: string;
   itemName: string;
   quantity: number;
@@ -476,20 +482,101 @@ export interface CustomerReturnItem {
   originalInvoiceNo?: string;
   reason?: string;
   status?: "pending" | "dispatched";
+  handoverStatus?: ReturnHandoverStatus;
+  warehouseReceivedQty?: number;
+  warehouseReceivedAt?: string;
+  warehouseReceivedBy?: string | { _id: string; name: string };
+  handoverNotes?: string;
+  inspectionStatus?: ReturnInspectionStatus;
+  approvedResellableQty?: number;
+  rejectedQty?: number;
+  rejectionReason?: string;
+  inspectedAt?: string;
+  inspectedBy?: string | { _id: string; name: string };
+  stockBatchId?: string;
+  supplierInvoiceNo?: string;
+  dispatchedAt?: string;
 }
 
 export interface CustomerReturn {
   _id: string;
   saleId?: string | Sale;
   invoiceNo: string;
-  customer: Customer | { _id: string; name: string; phone?: string; address?: string; customerType?: CustomerType };
+  customer: Customer | { _id: string; name: string; phone?: string; address?: string; customerType?: CustomerType; code?: string };
   cashier: User | { _id: string; name: string };
   tripId?: TripSession | { _id: string; tripNo: string; route?: string };
   items: CustomerReturnItem[];
   returnTotal: number;
   status: "pending" | "dispatched";
+  handoverStatus?: ReturnHandoverStatus;
+  warehouseReceivedAt?: string;
+  warehouseReceivedBy?: string | { _id: string; name: string };
+  handoverNotes?: string;
+  inspectionStatus?: ReturnInspectionStatus;
+  inspectedBy?: string | { _id: string; name: string };
+  inspectedAt?: string;
+  inspectionNotes?: string;
+  supplierInvoiceNo?: string;
+  dispatchedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReturnSummaryMetrics {
+  collectedUnits: number;
+  totalReturnValue: number;
+  pendingInspectionUnits: number;
+  pendingDispatchUnits: number;
+  dispatchedUnits: number;
+}
+
+export interface SupplierReturnProductLine {
+  itemCode: string;
+  itemName: string;
+  productId?: string;
+  supplier: string;
+  billingPrice: number;
+  collectedQty: number;
+  approvedQty: number;
+  rejectedQty: number;
+  resellableQty: number;
+  damagedQty: number;
+  expiredQty: number;
+  totalValue: number;
+  inspectionStatus: ReturnInspectionStatus;
+  handoverStatus: ReturnHandoverStatus;
+  status: string;
+}
+
+export interface SupplierReturnDispatch {
+  _id: string;
+  supplierInvoiceNo: string;
+  status: string;
+  dispatchedAt: string;
+  dispatchedBy?: string;
+  totalAmount: number;
+  itemCount: number;
+  transportRef?: string;
+  creditNoteRef?: string;
+}
+
+export interface SupplierReturnGroup {
+  supplierName: string;
+  totalUnits: number;
+  totalValue: number;
+  statusCounts: {
+    readyForDispatchUnits: number;
+    dispatchedUnits: number;
+    settledUnits: number;
+    pendingInspectionUnits: number;
+  };
+  products: SupplierReturnProductLine[];
+  dispatches: SupplierReturnDispatch[];
+}
+
+export interface MonthlySupplierSummary {
+  month: string;
+  suppliers: SupplierReturnGroup[];
 }
 
 export interface EligibleInvoiceItem {

@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Customer = require("../models/Customer");
 const Product = require("../models/Product");
@@ -152,28 +153,36 @@ const reserveStockForItems = async (items, preservedPricesMap = null) => {
   return { orderItems, batchUpdates, stockUpdates };
 };
 
-const restoreReservedStock = async (orderItems) => {
+const restoreReservedStock = async (orderItems, session = null) => {
   const restoreBatches = [];
   const stockUpdates = new Map();
 
-  orderItems.forEach((item) => {
-    stockUpdates.set(
-      item.productId.toString(),
-      (stockUpdates.get(item.productId.toString()) || 0) + item.quantity
-    );
+  for (const item of orderItems) {
+    const itemQty = Number(item.quantity || 0);
+    if (item.productId && itemQty > 0) {
+      const pIdStr = (item.productId?._id || item.productId).toString();
+      stockUpdates.set(pIdStr, (stockUpdates.get(pIdStr) || 0) + itemQty);
+    }
 
-    (item.usedBatches || []).forEach((batch) => {
-      restoreBatches.push({
-        updateOne: {
-          filter: { _id: batch.batchId },
-          update: { $inc: { remainingQty: batch.qty } }
-        }
-      });
-    });
-  });
+    const usedBatches = item.usedBatches || [];
+    for (const batch of usedBatches) {
+      const bId = batch.batchId?._id || batch.batchId;
+      const bQty = Number(batch.qty || 0);
+      if (bId && bQty > 0) {
+        restoreBatches.push({
+          updateOne: {
+            filter: { _id: bId },
+            update: { $inc: { remainingQty: bQty } }
+          }
+        });
+      }
+    }
+  }
+
+  const opts = session ? { session } : {};
 
   if (restoreBatches.length > 0) {
-    await StockBatch.bulkWrite(restoreBatches);
+    await StockBatch.bulkWrite(restoreBatches, opts);
   }
 
   if (stockUpdates.size > 0) {
@@ -183,7 +192,8 @@ const restoreReservedStock = async (orderItems) => {
           filter: { _id: productId },
           update: { $inc: { totalStock: qty } }
         }
-      }))
+      })),
+      opts
     );
   }
 };
@@ -669,24 +679,161 @@ const updateOrder = async (req, res) => {
 };
 
 const cancelOrder = async (req, res) => {
-  const order = await Order.findById(req.params.id);
-  if (!order) {
-    return res.status(404).json({ message: "Order not found" });
-  }
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
 
-  if (order.orderStatus === "cancelled") {
-    return res.json(order);
-  }
+    // 1. Idempotency safeguard: if already cancelled, return existing cancelled order safely
+    if (order.orderStatus === "cancelled") {
+      return res.json(order);
+    }
 
-  if (order.stockReserved) {
-    await restoreReservedStock(order.items);
-    order.stockReserved = false;
-  }
+    // 2. Reject if order is already delivered or invoiced
+    if (order.orderStatus === "delivered" || order.saleId) {
+      return res.status(400).json({
+        message: "Cannot cancel an order that has already been delivered and invoiced."
+      });
+    }
 
-  order.orderStatus = "cancelled";
-  order.paymentStatus = "not_collected";
-  await order.save();
-  return res.json(order);
+    // 3. Reject if packing has already started in warehouse
+    if (order.packingStatus && order.packingStatus !== "not_started") {
+      return res.status(400).json({
+        message: "Order cannot be cancelled because warehouse packing has already started."
+      });
+    }
+
+    // 4. Reject if non-pending or payment collected
+    if (order.paymentStatus && order.paymentStatus !== "not_collected") {
+      return res.status(400).json({
+        message: "Cannot cancel an order with recorded payments or ledger transactions."
+      });
+    }
+
+    // 5. Authorization check
+    if (
+      req.user &&
+      req.user.role === "rep" &&
+      order.cashier &&
+      order.cashier.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        message: "You are not authorized to cancel this order."
+      });
+    }
+
+    // 6. Cancellation reason validation
+    const reason = (req.body?.reason || req.body?.cancellationReason || "").trim();
+    if (!reason) {
+      return res.status(400).json({
+        message: "Cancellation reason is required."
+      });
+    }
+
+    // 7. Atomic Cancellation & FIFO Stock Restoration
+    let isReplicaSet = false;
+    try {
+      const topologyType = mongoose.connection?.client?.topology?.description?.type;
+      if (topologyType === "ReplicaSetWithPrimary" || topologyType === "Sharded") {
+        isReplicaSet = true;
+      }
+    } catch {
+      isReplicaSet = false;
+    }
+
+    if (isReplicaSet) {
+      const session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        const currentOrder = await Order.findById(req.params.id).session(session);
+
+        if (!currentOrder || currentOrder.orderStatus === "cancelled") {
+          await session.abortTransaction();
+          session.endSession();
+          return res.json(order);
+        }
+
+        if (currentOrder.orderStatus === "delivered" || currentOrder.saleId) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            message: "Cannot cancel an order that has already been delivered and invoiced."
+          });
+        }
+
+        if (currentOrder.stockReserved && currentOrder.items && currentOrder.items.length > 0) {
+          await restoreReservedStock(currentOrder.items, session);
+          currentOrder.stockReserved = false;
+        }
+
+        currentOrder.orderStatus = "cancelled";
+        currentOrder.paymentStatus = "not_collected";
+        currentOrder.cancellationReason = reason;
+        currentOrder.cancelledBy = req.user?._id;
+        currentOrder.cancelledAt = new Date();
+
+        await currentOrder.save({ session });
+        await session.commitTransaction();
+        session.endSession();
+
+        return res.json(currentOrder);
+      } catch (txErr) {
+        await session.abortTransaction();
+        session.endSession();
+        throw txErr;
+      }
+    } else {
+      // Standalone MongoDB (Controlled Atomic State Lock & Rollback Protection)
+      const currentOrder = await Order.findOneAndUpdate(
+        { _id: req.params.id, orderStatus: "pending_delivery" },
+        {
+          $set: {
+            orderStatus: "cancelled",
+            stockReserved: false,
+            cancellationReason: reason,
+            cancelledBy: req.user?._id,
+            cancelledAt: new Date()
+          }
+        },
+        { new: true }
+      );
+
+      if (!currentOrder) {
+        const recheck = await Order.findById(req.params.id);
+        if (recheck?.orderStatus === "cancelled") {
+          return res.json(recheck);
+        }
+        if (recheck?.orderStatus === "delivered" || recheck?.saleId) {
+          return res.status(400).json({
+            message: "Cannot cancel an order that has already been delivered and invoiced."
+          });
+        }
+        return res.status(409).json({ message: "Order state conflict during cancellation" });
+      }
+
+      try {
+        if (order.stockReserved && order.items && order.items.length > 0) {
+          await restoreReservedStock(order.items);
+        }
+      } catch (restoreErr) {
+        // Rollback status if batch restoration throws
+        await Order.findByIdAndUpdate(req.params.id, {
+          orderStatus: "pending_delivery",
+          stockReserved: true,
+          $unset: { cancellationReason: 1, cancelledBy: 1, cancelledAt: 1 }
+        });
+        throw restoreErr;
+      }
+
+      return res.json(currentOrder);
+    }
+  } catch (err) {
+    console.error("[cancelOrder Error]:", err);
+    return res.status(err.status || 500).json({
+      message: err.message || "Failed to cancel order"
+    });
+  }
 };
 
 const deleteOrder = async (req, res) => {

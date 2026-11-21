@@ -111,21 +111,43 @@ export default function DashboardScreen() {
       >
         {/* Top Header Row */}
         <View style={styles.headerRow}>
-          <View style={styles.repInfo}>
+          <TouchableOpacity
+            style={styles.repInfo}
+            onPress={() => router.push("/profile" as any)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Open Profile & Settings"
+          >
             <Text style={styles.greeting}>Good day,</Text>
             <Text style={styles.repName}>{user?.name || "Representative"}</Text>
             <View style={styles.dateRow}>
               <Calendar size={13} color={Colors.textMuted} style={{ marginRight: 4 }} />
               <Text style={styles.dateText}>{currentDateFormatted}</Text>
             </View>
-          </View>
+          </TouchableOpacity>
 
-          <View style={styles.logoBadge}>
-            <Image
-              source={require("../../assets/logo.png")}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <TouchableOpacity
+              style={styles.profileAvatarButton}
+              onPress={() => router.push("/profile" as any)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="View Profile"
+            >
+              <Text style={styles.profileAvatarText}>
+                {user?.name
+                  ? user.name.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("")
+                  : "SR"}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.logoBadge}>
+              <Image
+                source={require("../../assets/logo.png")}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+            </View>
           </View>
         </View>
 
@@ -453,6 +475,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     elevation: 2
+  },
+  profileAvatarButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.leaf,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 2,
+    shadowColor: Colors.leaf,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4
+  },
+  profileAvatarText: {
+    color: "#ffffff",
+    fontWeight: "800",
+    fontSize: Typography.sm
   },
   logo: {
     width: 30,

@@ -23,7 +23,8 @@ import {
   Receipt,
   Search,
   ShoppingCart,
-  Truck
+  Truck,
+  X
 } from "lucide-react-native";
 import { fetchSales } from "../../src/api/sales";
 import { fetchOrders } from "../../src/api/orders";
@@ -33,6 +34,7 @@ import { Card } from "../../src/components/common/Card";
 import { Badge } from "../../src/components/common/Badge";
 import { InvoiceReceiptModal } from "../../src/components/pos/InvoiceReceiptModal";
 import { OrderDeliveryModal } from "../../src/components/pos/OrderDeliveryModal";
+import { OrderCancellationModal } from "../../src/components/pos/OrderCancellationModal";
 import { useResponsive } from "../../src/hooks/useResponsive";
 import { BorderRadius, Colors, Spacing, Typography } from "../../src/theme/colors";
 import { useAuthStore } from "../../src/store/authStore";
@@ -82,6 +84,7 @@ export default function SalesScreen() {
   const [selectedReceiptSale, setSelectedReceiptSale] = useState<Sale | null>(null);
   const [selectedReceiptOrder, setSelectedReceiptOrder] = useState<Order | null>(null);
   const [orderToDeliver, setOrderToDeliver] = useState<Order | null>(null);
+  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [unsyncedDraftsCount, setUnsyncedDraftsCount] = useState(0);
 
   const checkUnsyncedDrafts = useCallback(async () => {
@@ -401,6 +404,25 @@ export default function SalesScreen() {
                 const isPending = item.orderStatus === "pending_delivery";
                 const isDelivered = item.orderStatus === "delivered";
 
+                const statusLabel = isPending
+                  ? "Pending Packing"
+                  : isDelivered
+                  ? "Delivered"
+                  : "Cancelled";
+
+                const statusVariant = isPending
+                  ? "warning"
+                  : isDelivered
+                  ? "success"
+                  : "danger";
+
+                const productCount = item.items.length;
+                const totalOrderedUnits = (item.items || []).reduce(
+                  (sum, it) => sum + (Number(it.quantity) || 0),
+                  0
+                );
+                const summaryLine = `${productCount} ${productCount === 1 ? "product" : "products"} · ${totalOrderedUnits} ${totalOrderedUnits === 1 ? "unit" : "units"} · ${formatLKR(item.netTotal)}`;
+
                 return (
                   <TouchableOpacity
                     onPress={() => setSelectedReceiptOrder(item)}
@@ -414,8 +436,8 @@ export default function SalesScreen() {
                           <Text style={styles.invoiceNo}>{item.orderNo}</Text>
                         </View>
                         <Badge
-                          label={isPending ? "PENDING DELIVERY" : isDelivered ? "DELIVERED" : "CANCELLED"}
-                          variant={isPending ? "warning" : isDelivered ? "success" : "neutral"}
+                          label={statusLabel}
+                          variant={statusVariant}
                           size="sm"
                         />
                       </View>
@@ -426,26 +448,48 @@ export default function SalesScreen() {
                             {item.customer?.name || "Walk-in Order"}
                           </Text>
                           <Text style={styles.timeText}>
-                            {item.items.length} reserved line items • Value: {formatLKR(item.netTotal)}
+                            {summaryLine}
                           </Text>
                         </View>
 
                         {isPending && (
-                          <TouchableOpacity
-                            style={[styles.deliverActionBtn, isOfflineMode && { opacity: 0.6 }]}
-                            onPress={(e) => {
-                              e.stopPropagation?.();
-                              if (isOfflineMode) {
-                                assertOnline("Order Delivery");
-                                return;
-                              }
-                              setOrderToDeliver(item);
-                            }}
-                            activeOpacity={0.8}
-                          >
-                            <FileCheck size={14} color={Colors.textInverse} style={{ marginRight: 4 }} />
-                            <Text style={styles.deliverActionText}>Deliver</Text>
-                          </TouchableOpacity>
+                          <View style={styles.orderActionsRow}>
+                            <TouchableOpacity
+                              style={[styles.cancelActionBtn, isOfflineMode && { opacity: 0.6 }]}
+                              onPress={(e) => {
+                                e.stopPropagation?.();
+                                if (isOfflineMode) {
+                                  assertOnline("Order Cancellation");
+                                  return;
+                                }
+                                setOrderToCancel(item);
+                              }}
+                              activeOpacity={0.8}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Cancel Order ${item.orderNo}`}
+                            >
+                              <X size={13} color={Colors.danger} style={{ marginRight: 3 }} />
+                              <Text style={styles.cancelActionText}>Cancel Order</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[styles.deliverActionBtn, isOfflineMode && { opacity: 0.6 }]}
+                              onPress={(e) => {
+                                e.stopPropagation?.();
+                                if (isOfflineMode) {
+                                  assertOnline("Order Delivery");
+                                  return;
+                                }
+                                setOrderToDeliver(item);
+                              }}
+                              activeOpacity={0.8}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Deliver Order ${item.orderNo}`}
+                            >
+                              <FileCheck size={13} color={Colors.textInverse} style={{ marginRight: 3 }} />
+                              <Text style={styles.deliverActionText}>Deliver</Text>
+                            </TouchableOpacity>
+                          </View>
                         )}
                       </View>
                     </Card>
@@ -489,6 +533,19 @@ export default function SalesScreen() {
             visible={!!orderToDeliver}
             order={orderToDeliver}
             onClose={() => setOrderToDeliver(null)}
+          />
+        ) : null}
+
+        {/* Cancel Order Confirmation Modal */}
+        {orderToCancel ? (
+          <OrderCancellationModal
+            visible={!!orderToCancel}
+            order={orderToCancel}
+            onClose={() => setOrderToCancel(null)}
+            onSuccess={() => {
+              setOrderToCancel(null);
+              refetchOrders();
+            }}
           />
         ) : null}
       </View>
@@ -634,6 +691,26 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Colors.danger,
     marginTop: 1
+  },
+  orderActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6
+  },
+  cancelActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.danger,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.sm
+  },
+  cancelActionText: {
+    fontSize: Typography.xs,
+    fontWeight: "700",
+    color: Colors.danger
   },
   deliverActionBtn: {
     flexDirection: "row",

@@ -43,8 +43,13 @@ export const deliverOrder = async (
 /**
  * Cancel a pending order and release reserved stock.
  */
-export const cancelOrder = async (orderId: string): Promise<Order> => {
-  const response = await apiClient.patch<Order>(`/api/orders/${orderId}/cancel`);
+export const cancelOrder = async (
+  orderId: string,
+  payload?: { reason?: string; cancellationReason?: string }
+): Promise<Order> => {
+  const response = await apiClient.patch<Order>(`/api/orders/${orderId}/cancel`, {
+    reason: payload?.reason || payload?.cancellationReason || "Customer requested cancellation"
+  });
   return response.data;
 };
 

@@ -79,6 +79,14 @@ const orderSchema = new mongoose.Schema(
     chequeNo: { type: String, trim: true },
     chequeDate: { type: Date },
     stockReserved: { type: Boolean, default: false },
+    packingStatus: {
+      type: String,
+      enum: ["not_started", "packing", "packed"],
+      default: "not_started"
+    },
+    cancellationReason: { type: String, trim: true },
+    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    cancelledAt: { type: Date },
     deliveryDate: { type: Date },
     saleId: { type: mongoose.Schema.Types.ObjectId, ref: "Sale" },
     tripId: { type: mongoose.Schema.Types.ObjectId, ref: "TripSession" },

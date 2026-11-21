@@ -429,7 +429,19 @@ exports.getEligibleInvoices = async (req, res) => {
  */
 exports.getCustomerReturns = async (req, res) => {
   try {
-    const { customerId, condition, status, startDate, endDate, invoiceNo } = req.query;
+    const {
+      customerId,
+      condition,
+      status,
+      startDate,
+      endDate,
+      invoiceNo,
+      tripId,
+      handoverStatus,
+      inspectionStatus,
+      search,
+      allReps
+    } = req.query;
     const filter = {};
 
     if (customerId) {
@@ -444,6 +456,15 @@ exports.getCustomerReturns = async (req, res) => {
     if (condition && condition !== "all") {
       filter["items.condition"] = condition;
     }
+    if (handoverStatus && handoverStatus !== "all") {
+      filter.handoverStatus = handoverStatus;
+    }
+    if (inspectionStatus && inspectionStatus !== "all") {
+      filter.inspectionStatus = inspectionStatus;
+    }
+    if (tripId) {
+      filter.tripId = tripId;
+    }
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
@@ -454,15 +475,27 @@ exports.getCustomerReturns = async (req, res) => {
       }
     }
 
-    if (req.user?.role === "rep") {
+    if (req.user?.role === "rep" && allReps !== "true" && !tripId) {
       filter.cashier = req.user._id;
+    }
+
+    if (search) {
+      const regex = new RegExp(search, "i");
+      filter.$or = [
+        { invoiceNo: regex },
+        { "items.itemCode": regex },
+        { "items.itemName": regex }
+      ];
     }
 
     const returns = await Return.find(filter)
       .sort({ createdAt: -1 })
-      .populate("customer", "name phone address customerType")
+      .populate("customer", "name phone address customerType code")
       .populate("cashier", "name")
-      .populate("tripId", "tripNo route");
+      .populate("tripId", "tripNo route")
+      .populate("inspectedBy", "name")
+      .populate("warehouseReceivedBy", "name")
+      .populate("items.productId", "displayName itemCode supplier currentBillingPrice currentSellingPrice");
 
     return res.json(returns);
   } catch (err) {
@@ -620,6 +653,9 @@ exports.inspectReturn = async (req, res) => {
     returnDoc.inspectedBy = req.user._id;
     returnDoc.inspectedAt = new Date();
     returnDoc.inspectionNotes = inspectionNotes ? String(inspectionNotes).trim() : "";
+    returnDoc.handoverStatus = "received";
+    if (!returnDoc.warehouseReceivedAt) returnDoc.warehouseReceivedAt = new Date();
+    if (!returnDoc.warehouseReceivedBy) returnDoc.warehouseReceivedBy = req.user._id;
 
     await returnDoc.save();
 
@@ -662,5 +698,354 @@ exports.getInspectionHistory = async (req, res) => {
     return res.json(returns);
   } catch (err) {
     return res.status(500).json({ message: err.message || "Failed to fetch inspection history" });
+  }
+};
+
+/**
+ * Returns Summary Metrics
+ * GET /api/returns/summary
+ * Query: period ('today' | 'trip' | 'month' | 'custom'), tripId, startDate, endDate, month
+ */
+exports.getReturnsSummary = async (req, res) => {
+  try {
+    const { period, tripId, startDate, endDate, month } = req.query;
+    const filter = {};
+
+    if (tripId) {
+      filter.tripId = tripId;
+    } else if (period === "trip") {
+      const activeTrip = await TripSession.findOne({
+        status: "active",
+        ...(req.user?.role === "rep" ? { salesRep: req.user._id } : {})
+      });
+      if (activeTrip) {
+        filter.tripId = activeTrip._id;
+      } else {
+        return res.json({
+          collectedUnits: 0,
+          totalReturnValue: 0,
+          pendingInspectionUnits: 0,
+          pendingDispatchUnits: 0,
+          dispatchedUnits: 0
+        });
+      }
+    } else if (period === "today") {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      filter.createdAt = { $gte: startOfDay, $lte: endOfDay };
+    } else if (period === "month" || month) {
+      const targetMonth = month || new Date().toISOString().slice(0, 7); // e.g. "2026-11"
+      const [year, m] = targetMonth.split("-").map(Number);
+      const startOfMonth = new Date(year, m - 1, 1, 0, 0, 0, 0);
+      const endOfMonth = new Date(year, m, 0, 23, 59, 59, 999);
+      filter.createdAt = { $gte: startOfMonth, $lte: endOfMonth };
+    } else if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
+    if (req.user?.role === "rep" && period === "trip") {
+      filter.cashier = req.user._id;
+    }
+
+    const returns = await Return.find(filter).populate("items.productId", "supplier");
+
+    let collectedUnits = 0;
+    let totalReturnValue = 0;
+    let pendingInspectionUnits = 0;
+    let pendingDispatchUnits = 0;
+    let dispatchedUnits = 0;
+
+    returns.forEach((ret) => {
+      totalReturnValue += ret.returnTotal || 0;
+      (ret.items || []).forEach((item) => {
+        const qty = item.quantity || 0;
+        collectedUnits += qty;
+
+        if (item.status === "dispatched") {
+          dispatchedUnits += qty;
+        } else {
+          if (!item.inspectionStatus || item.inspectionStatus === "pending_inspection") {
+            pendingInspectionUnits += qty;
+          } else {
+            pendingDispatchUnits += qty;
+          }
+        }
+      });
+    });
+
+    return res.json({
+      collectedUnits,
+      totalReturnValue: Math.round(totalReturnValue * 100) / 100,
+      pendingInspectionUnits,
+      pendingDispatchUnits,
+      dispatchedUnits
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to calculate returns summary" });
+  }
+};
+
+/**
+ * Monthly Supplier Return Summary
+ * GET /api/returns/monthly-supplier-summary
+ * Query: month ('YYYY-MM', default: current month)
+ */
+exports.getMonthlySupplierSummary = async (req, res) => {
+  try {
+    const targetMonth = req.query.month || new Date().toISOString().slice(0, 7);
+    const [year, m] = targetMonth.split("-").map(Number);
+    const startOfMonth = new Date(year, m - 1, 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(year, m, 0, 23, 59, 59, 999);
+
+    // 1. Fetch all returns created in this month
+    const monthlyReturns = await Return.find({
+      createdAt: { $gte: startOfMonth, $lte: endOfMonth }
+    })
+      .populate("customer", "name code")
+      .populate("cashier", "name")
+      .populate("items.productId", "displayName itemCode supplier currentBillingPrice currentSellingPrice");
+
+    // 2. Fetch SupplierReturn dispatches for this month
+    const dispatches = await SupplierReturn.find({
+      $or: [
+        { reportingMonth: targetMonth },
+        { dispatchedAt: { $gte: startOfMonth, $lte: endOfMonth } }
+      ]
+    }).populate("dispatchedBy", "name");
+
+    // Standard suppliers
+    const supplierMap = new Map();
+    ["Ruhunu Foods", "Gajamuthu Foods"].forEach((supName) => {
+      supplierMap.set(supName, {
+        supplierName: supName,
+        totalUnits: 0,
+        totalValue: 0,
+        statusCounts: {
+          readyForDispatchUnits: 0,
+          dispatchedUnits: 0,
+          settledUnits: 0,
+          pendingInspectionUnits: 0
+        },
+        productsMap: new Map(),
+        dispatches: []
+      });
+    });
+
+    // Process customer returns into supplier groupings
+    monthlyReturns.forEach((ret) => {
+      (ret.items || []).forEach((item) => {
+        const prod = item.productId || {};
+        const supplierName = prod.supplier || "Ruhunu Foods";
+
+        if (!supplierMap.has(supplierName)) {
+          supplierMap.set(supplierName, {
+            supplierName,
+            totalUnits: 0,
+            totalValue: 0,
+            statusCounts: {
+              readyForDispatchUnits: 0,
+              dispatchedUnits: 0,
+              settledUnits: 0,
+              pendingInspectionUnits: 0
+            },
+            productsMap: new Map(),
+            dispatches: []
+          });
+        }
+
+        const supData = supplierMap.get(supplierName);
+        const qty = item.quantity || 0;
+        const lineTotal = item.returnTotal || (qty * (item.returnPrice || 0));
+
+        supData.totalUnits += qty;
+        supData.totalValue += lineTotal;
+
+        // Categorize status
+        if (item.status === "dispatched") {
+          supData.statusCounts.dispatchedUnits += qty;
+        } else if (!item.inspectionStatus || item.inspectionStatus === "pending_inspection") {
+          supData.statusCounts.pendingInspectionUnits += qty;
+        } else if (item.inspectionStatus === "approved" || item.condition !== "resellable") {
+          supData.statusCounts.readyForDispatchUnits += qty;
+        } else {
+          supData.statusCounts.readyForDispatchUnits += qty;
+        }
+
+        // Product rollup
+        const pKey = item.itemCode || prod.itemCode || "UNKNOWN";
+        if (!supData.productsMap.has(pKey)) {
+          supData.productsMap.set(pKey, {
+            itemCode: pKey,
+            itemName: item.itemName || prod.displayName || pKey,
+            productId: prod._id,
+            supplier: supplierName,
+            billingPrice: item.returnPrice || prod.currentBillingPrice || 0,
+            collectedQty: 0,
+            approvedQty: 0,
+            rejectedQty: 0,
+            resellableQty: 0,
+            damagedQty: 0,
+            expiredQty: 0,
+            totalValue: 0,
+            inspectionStatus: item.inspectionStatus || "pending_inspection",
+            handoverStatus: ret.handoverStatus || item.handoverStatus || "pending_handover",
+            status: item.status || "pending"
+          });
+        }
+
+        const pItem = supData.productsMap.get(pKey);
+        pItem.collectedQty += qty;
+        pItem.totalValue += lineTotal;
+        pItem.approvedQty += (item.approvedResellableQty || 0);
+        pItem.rejectedQty += (item.rejectedQty || 0);
+
+        if (item.condition === "resellable") pItem.resellableQty += qty;
+        else if (item.condition === "damaged") pItem.damagedQty += qty;
+        else if (item.condition === "expired") pItem.expiredQty += qty;
+      });
+    });
+
+    // Map dispatches to suppliers
+    dispatches.forEach((disp) => {
+      const supName = disp.supplierName || "Ruhunu Foods";
+      if (!supplierMap.has(supName)) {
+        supplierMap.set(supName, {
+          supplierName: supName,
+          totalUnits: 0,
+          totalValue: 0,
+          statusCounts: {
+            readyForDispatchUnits: 0,
+            dispatchedUnits: 0,
+            settledUnits: 0,
+            pendingInspectionUnits: 0
+          },
+          productsMap: new Map(),
+          dispatches: []
+        });
+      }
+      const supData = supplierMap.get(supName);
+
+      if (disp.status === "settled" || disp.status === "acknowledged") {
+        const dUnits = (disp.items || []).reduce((sum, it) => sum + (it.quantity || 0), 0);
+        supData.statusCounts.settledUnits += dUnits;
+      }
+
+      supData.dispatches.push({
+        _id: disp._id,
+        supplierInvoiceNo: disp.supplierInvoiceNo,
+        status: disp.status || "dispatched",
+        dispatchedAt: disp.dispatchedAt,
+        dispatchedBy: disp.dispatchedBy?.name,
+        totalAmount: disp.totalAmount,
+        itemCount: (disp.items || []).length,
+        transportRef: disp.transportRef,
+        creditNoteRef: disp.creditNoteRef
+      });
+    });
+
+    // Format final response array
+    const suppliers = Array.from(supplierMap.values()).map((sup) => ({
+      supplierName: sup.supplierName,
+      totalUnits: sup.totalUnits,
+      totalValue: Math.round(sup.totalValue * 100) / 100,
+      statusCounts: sup.statusCounts,
+      products: Array.from(sup.productsMap.values()),
+      dispatches: sup.dispatches
+    }));
+
+    return res.json({
+      month: targetMonth,
+      suppliers
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to generate monthly supplier summary" });
+  }
+};
+
+/**
+ * Acknowledge physical receipt of returns at warehouse
+ * POST /api/returns/:id/receive
+ */
+exports.receiveReturnsAtWarehouse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items, handoverNotes } = req.body;
+
+    const returnDoc = await Return.findById(id);
+    if (!returnDoc) {
+      return res.status(404).json({ message: "Return record not found" });
+    }
+
+    const userId = req.user?._id;
+    const now = new Date();
+
+    let allReceived = true;
+    let anyReceived = false;
+
+    if (Array.isArray(items) && items.length > 0) {
+      returnDoc.items.forEach((it) => {
+        const match = items.find((recv) => recv.itemCode === it.itemCode);
+        if (match) {
+          const recvQty = Number(match.quantityReceived ?? it.quantity);
+          it.warehouseReceivedQty = recvQty;
+          it.warehouseReceivedAt = now;
+          it.warehouseReceivedBy = userId;
+          it.handoverNotes = match.handoverNotes || handoverNotes || "";
+
+          if (recvQty >= it.quantity) {
+            it.handoverStatus = "received";
+            anyReceived = true;
+          } else if (recvQty > 0) {
+            it.handoverStatus = "partially_received";
+            allReceived = false;
+            anyReceived = true;
+          } else {
+            it.handoverStatus = "pending_handover";
+            allReceived = false;
+          }
+        } else {
+          allReceived = false;
+        }
+      });
+    } else {
+      returnDoc.items.forEach((it) => {
+        it.handoverStatus = "received";
+        it.warehouseReceivedQty = it.quantity;
+        it.warehouseReceivedAt = now;
+        it.warehouseReceivedBy = userId;
+        it.handoverNotes = handoverNotes || "";
+      });
+      anyReceived = true;
+      allReceived = true;
+    }
+
+    returnDoc.handoverStatus = allReceived ? "received" : (anyReceived ? "partially_received" : "pending_handover");
+    returnDoc.warehouseReceivedAt = now;
+    returnDoc.warehouseReceivedBy = userId;
+    if (handoverNotes) returnDoc.handoverNotes = String(handoverNotes).trim();
+
+    await returnDoc.save();
+
+    const populated = await Return.findById(returnDoc._id)
+      .populate("customer", "name code phone")
+      .populate("cashier", "name")
+      .populate("warehouseReceivedBy", "name")
+      .populate("items.productId", "displayName itemCode supplier currentBillingPrice")
+      .populate("tripId", "tripNo route");
+
+    return res.json({
+      message: "Warehouse handover recorded successfully.",
+      returnRecord: populated
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to record warehouse handover" });
   }
 };

@@ -94,6 +94,15 @@ function ThemedAppContent() {
               }}
             />
 
+            {/* Profile & Settings (Relocated from bottom tabs) */}
+            <Stack.Screen
+              name="profile/index"
+              options={{
+                headerShown: false,
+                presentation: "card"
+              }}
+            />
+
             {/* Offline Van Orders (Milestone 9.1) */}
             <Stack.Screen
               name="orders/offline"

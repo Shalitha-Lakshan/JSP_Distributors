@@ -32,7 +32,16 @@ const returnItemSchema = new mongoose.Schema(
     inspectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     stockBatchId: { type: mongoose.Schema.Types.ObjectId, ref: "StockBatch" },
     supplierInvoiceNo: { type: String },
-    dispatchedAt: { type: Date }
+    dispatchedAt: { type: Date },
+    handoverStatus: {
+      type: String,
+      enum: ["pending_handover", "partially_received", "received"],
+      default: "pending_handover"
+    },
+    warehouseReceivedQty: { type: Number, default: 0, min: 0 },
+    warehouseReceivedAt: { type: Date },
+    warehouseReceivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    handoverNotes: { type: String, trim: true }
   },
   { _id: false }
 );
@@ -50,6 +59,14 @@ const returnSchema = new mongoose.Schema(
       enum: ["pending", "dispatched"],
       default: "pending"
     },
+    handoverStatus: {
+      type: String,
+      enum: ["pending_handover", "partially_received", "received"],
+      default: "pending_handover"
+    },
+    warehouseReceivedAt: { type: Date },
+    warehouseReceivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    handoverNotes: { type: String, trim: true },
     inspectionStatus: {
       type: String,
       enum: ["pending_inspection", "partially_approved", "approved", "rejected"],

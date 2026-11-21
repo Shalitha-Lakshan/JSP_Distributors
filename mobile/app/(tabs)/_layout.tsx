@@ -5,7 +5,7 @@ import {
   FileText,
   LayoutDashboard,
   Package,
-  User as UserIcon,
+  RotateCcw,
   Users
 } from "lucide-react-native";
 import { Colors, Typography, useAppTheme } from "../../src/theme/colors";
@@ -67,10 +67,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="profile"
+        name="returns"
         options={{
-          title: "Profile",
-          tabBarIcon: ({ color, size }) => <UserIcon size={size - 2} color={color} />
+          title: "Returns",
+          tabBarIcon: ({ color, size }) => <RotateCcw size={size - 2} color={color} />
         }}
       />
     </Tabs>
