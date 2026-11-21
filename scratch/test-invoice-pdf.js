@@ -330,6 +330,231 @@ assert.strictEqual(deliveryDiscount, 800);
 assert.strictEqual(deliveryNetTotal, 9200);
 console.log("✓ Order delivery dynamically recalculates net totals with adjusted discount percentage");
 
+// TEST 15: Two-Price Invoice Display (Selling Price Ref & Customer Billing Price Exclusive Total)
+console.log("\n[Test 15] Two-Price Invoice Display & Billing Price Exclusive Calculation");
+const twoPriceDoc = {
+  invoiceNo: "INV-2026-PRICE-01",
+  customer: { name: "City Center Stores", address: "Kandy Road", phone: "0778899000" },
+  items: [
+    {
+      itemCode: "AUD-B-0104",
+      itemName: "Chillie Powder 100g",
+      quantity: 4,
+      sellingPrice: 110, // Selling Reference
+      billingPrice: 80,  // Customer Billing Price
+      lineTotal: 320     // 4 * 80 = 320
+    },
+    {
+      itemCode: "TURM-01",
+      itemName: "Turmeric Powder 50g",
+      quantity: 2,
+      sellingPrice: 150, // Selling Reference
+      billingPrice: 140, // Customer Billing Price
+      lineTotal: 280     // 2 * 140 = 280
+    },
+    {
+      itemCode: "LEG-01",
+      itemName: "Legacy Item Without Selling Snapshot",
+      quantity: 1,
+      billingPrice: 100, // Customer Billing Price
+      lineTotal: 100
+    }
+  ],
+  orderTotal: 700, // 320 + 280 + 100 = 700
+  discount: 100,
+  returnTotal: 0,
+  netTotal: 600,
+  paidAmount: 600,
+  dueAmount: 0,
+  paymentMethod: "cash",
+  paymentStatus: "paid"
+};
+
+const twoPriceHtml = generateInvoiceHtml(twoPriceDoc);
+assert(twoPriceHtml.includes("Selling Price"), "Must contain Selling Price header");
+assert(twoPriceHtml.includes("(Ref. Only)"), "Must clearly label Selling Price as (Ref. Only)");
+assert(twoPriceHtml.includes("Billing Price"), "Must contain Billing Price header");
+assert(twoPriceHtml.includes("AUD-B-0104"), "Must contain item code AUD-B-0104");
+assert(twoPriceHtml.includes("Chillie Powder 100g"), "Must contain product name");
+assert(twoPriceHtml.includes("N/A"), "Legacy item without selling snapshot must render N/A");
+
+// Verify that the total payable is 600.00 (from Billing Price 320+280+100-100 = 600)
+// and NOT 840 (which would be from selling prices 4*110 + 2*150 + 100 = 840)
+assert(twoPriceHtml.includes("700"), "Subtotal must contain 700 calculated from billing price");
+assert(twoPriceHtml.includes("600"), "Net Total must contain 600 calculated from billing price");
+assert(!twoPriceHtml.includes("840"), "Selling price must NEVER be used to calculate what customer owes");
+console.log("✓ Invoice displays both prices, labels Selling Price as Ref. Only, handles legacy N/A, and calculates strictly from Billing Price");
+
+// TEST 16: Single Batch Order Confirmation PDF
+console.log("\n[Test 16] Single Batch Order Confirmation PDF");
+const singleBatchOrder = {
+  orderNo: "ORD-00000001",
+  customer: { name: "Single Batch Mart", phone: "0771122334" },
+  items: [
+    {
+      itemCode: "TP50",
+      itemName: "Turmeric Powder 50g",
+      quantity: 130,
+      billingPrice: 150,
+      sellingPrice: 200,
+      lineTotal: 19500,
+      usedBatches: [
+        {
+          batchNo: "B-1795183273179",
+          qty: 130,
+          billingPrice: 150,
+          sellingPrice: 200,
+          lineTotal: 19500
+        }
+      ]
+    }
+  ],
+  orderTotal: 19500,
+  netTotal: 19500,
+  dueAmount: 19500,
+  paidAmount: 0
+};
+const singleHtml = generateInvoiceHtml(singleBatchOrder);
+assert(singleHtml.includes("ORDER CONFIRMATION"), "Must be ORDER CONFIRMATION");
+assert(singleHtml.includes("ORD-00000001"), "Must include order number");
+assert(singleHtml.includes("TP50"), "Must include TP50");
+assert(singleHtml.includes("130"), "Must include quantity 130");
+assert(singleHtml.includes("200"), "Must include selling price 200");
+assert(singleHtml.includes("150"), "Must include billing price 150");
+assert(singleHtml.includes("19,500"), "Must include total 19,500");
+assert(!singleHtml.includes("undefined"), "Must NOT include undefined");
+assert(!singleHtml.includes("NaN"), "Must NOT include NaN");
+console.log("✓ Single batch order renders cleanly without sub-row clutter or undefined values");
+
+// TEST 17: Two-Batch Order Confirmation PDF (Exact ORD-00000003 Case!)
+console.log("\n[Test 17] Two-Batch Order Confirmation PDF (Replicating ORD-00000003)");
+const ord0003Doc = {
+  orderNo: "ORD-00000003",
+  customer: null,
+  cashier: { name: "Rajitha Dilshan" },
+  items: [
+    {
+      productId: "6b005299e014fe87de83c78c",
+      itemCode: "TP50",
+      itemName: "Turmeric Powder 50 g",
+      quantity: 210,
+      unitPrice: 173.8095238095238, // Misleading average stored in legacy unitPrice
+      lineTotal: 36500,
+      usedBatches: [
+        {
+          batchId: "6b0053dbe014fe87de83c83e",
+          batchNo: "B-1795183579949",
+          qty: 100,
+          billingPrice: 200,
+          lineTotal: 20000
+        },
+        {
+          batchId: "6b0052a9e014fe87de83c79a",
+          batchNo: "B-1795183273179",
+          qty: 110,
+          billingPrice: 150,
+          lineTotal: 16500
+        }
+      ]
+    }
+  ],
+  orderTotal: 36500,
+  netTotal: 36500,
+  dueAmount: 36500,
+  paidAmount: 0
+};
+// Provide batch reference catalog (matches live database records)
+const catalogBatches = [
+  { batchNo: "B-1795183579949", billingPrice: 200, sellingPrice: 250 },
+  { batchNo: "B-1795183273179", billingPrice: 150, sellingPrice: 200 }
+];
+const ord3Html = generateInvoiceHtml(ord0003Doc, { batches: catalogBatches });
+assert(ord3Html.includes("ORDER CONFIRMATION"), "Title must be ORDER CONFIRMATION");
+assert(ord3Html.includes("ORD-00000003"), "Must contain ORD-00000003");
+assert(ord3Html.includes("TP50"), "Must contain TP50");
+assert(ord3Html.includes("210"), "Must contain total quantity 210");
+assert(ord3Html.includes("36,500"), "Must contain net total 36,500");
+
+// Check FIFO Allocations F1 and F2:
+assert(ord3Html.includes("TP50 (F1)"), "Must contain F1 allocation label");
+assert(ord3Html.includes("Batch B-1795183579949"), "Must contain F1 batch number");
+assert(ord3Html.includes("100"), "F1 allocated quantity must be 100");
+assert(ord3Html.includes("250"), "F1 selling price must be 250");
+assert(ord3Html.includes("200"), "F1 billing price must be 200");
+assert(ord3Html.includes("20,000"), "F1 line amount must be 20,000");
+
+assert(ord3Html.includes("TP50 (F2)"), "Must contain F2 allocation label");
+assert(ord3Html.includes("Batch B-1795183273179"), "Must contain F2 batch number");
+assert(ord3Html.includes("110"), "F2 allocated quantity must be 110");
+assert(ord3Html.includes("200"), "F2 selling price must be 200");
+assert(ord3Html.includes("150"), "F2 billing price must be 150");
+assert(ord3Html.includes("16,500"), "F2 line amount must be 16,500");
+
+// Strict Negative Assertions:
+assert(!ord3Html.includes("undefined"), "Quantity must NOT be undefined!");
+assert(!ord3Html.includes("NaN"), "Must NOT contain NaN!");
+assert(!ord3Html.includes("173.81"), "Misleading average billing price (173.81) must NOT be shown!");
+console.log("✓ ORD-00000003 displays F1 (100 @ 250 / 200 = 20,000) and F2 (110 @ 200 / 150 = 16,500) perfectly with no undefined or misleading averages");
+
+// TEST 18: Three-Batch Order Confirmation PDF
+console.log("\n[Test 18] Three-Batch Order Confirmation PDF");
+const threeBatchDoc = {
+  orderNo: "ORD-00000004",
+  items: [
+    {
+      itemCode: "CP100",
+      itemName: "Chili Powder 100g",
+      quantity: 150,
+      billingPrice: 120,
+      lineTotal: 18000,
+      usedBatches: [
+        { batchNo: "B-CP-01", qty: 50, billingPrice: 100, sellingPrice: 120, lineTotal: 5000 },
+        { batchNo: "B-CP-02", qty: 50, billingPrice: 120, sellingPrice: 140, lineTotal: 6000 },
+        { batchNo: "B-CP-03", qty: 50, billingPrice: 140, sellingPrice: 160, lineTotal: 7000 }
+      ]
+    }
+  ],
+  orderTotal: 18000,
+  netTotal: 18000,
+  dueAmount: 18000,
+  paidAmount: 0
+};
+const threeHtml = generateInvoiceHtml(threeBatchDoc);
+assert(threeHtml.includes("CP100 (F1)"), "Must include F1");
+assert(threeHtml.includes("CP100 (F2)"), "Must include F2");
+assert(threeHtml.includes("CP100 (F3)"), "Must include F3");
+assert(threeHtml.includes("18,000"), "Must include total 18,000");
+console.log("✓ Three-batch order correctly renders all three allocations with their respective prices");
+
+// TEST 19: Strict Financial Calculation Independence
+console.log("\n[Test 19] Strict Financial Calculation Independence");
+// Selling price total: (100*250 + 110*200) = 25,000 + 22,000 = 47,000
+// Billing price total: (100*200 + 110*150) = 20,000 + 16,500 = 36,500
+assert(!ord3Html.includes("47,000"), "Selling price must NEVER enter any total or payable amount!");
+assert(ord3Html.includes("36,500"), "Net Total must strictly equal 36,500 calculated from billing price");
+console.log("✓ Financial calculation independence verified: Selling prices are 100% display-only");
+
+// TEST 20: Delivered Sales Invoice with Multiple Batches
+console.log("\n[Test 20] Delivered Sales Invoice with Multiple Batches");
+const deliveredSaleDoc = {
+  invoiceNo: "INV-00000099",
+  customer: { name: "Delivered Retailer" },
+  items: ord0003Doc.items,
+  orderTotal: 36500,
+  netTotal: 36500,
+  paidAmount: 36500,
+  dueAmount: 0,
+  paymentMethod: "cash",
+  paymentStatus: "paid"
+};
+const deliveredHtml = generateInvoiceHtml(deliveredSaleDoc, { batches: catalogBatches });
+assert(deliveredHtml.includes("REDISTRIBUTOR SALES INVOICE"), "Title must be REDISTRIBUTOR SALES INVOICE");
+assert(deliveredHtml.includes("INV-00000099"), "Must contain invoice number");
+assert(deliveredHtml.includes("TP50 (F1)"), "Must contain F1");
+assert(deliveredHtml.includes("TP50 (F2)"), "Must contain F2");
+assert(!deliveredHtml.includes("undefined"), "Must not contain undefined");
+console.log("✓ Delivered Sales Invoice PDF remains 100% correct with multi-batch breakdown");
+
 console.log("\n=======================================================");
-console.log(">>> ALL 14 COMPREHENSIVE PDF & INVOICE TESTS PASSED! <<<");
+console.log(">>> ALL 20 COMPREHENSIVE PDF & INVOICE TESTS PASSED! <<<");
 console.log("=======================================================\n");

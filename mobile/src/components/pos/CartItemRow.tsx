@@ -93,8 +93,10 @@ export const CartItemRow: React.FC<CartItemRowProps> = ({
       {/* Bottom Controls Row: Unit Price & Quantity & Line Total */}
       <View style={styles.bottomRow}>
         <View style={styles.priceCol}>
-          <Text style={styles.unitPriceLabel}>UNIT</Text>
-          <Text style={styles.unitPriceValue}>{formatLKR(item.sellingPrice)}</Text>
+          <Text style={styles.unitPriceLabel}>
+            {item.allocations && item.allocations.length > 1 ? "AVG BILLING" : "BILLING RATE"}
+          </Text>
+          <Text style={styles.unitPriceValue}>{formatLKR(item.billingPrice)}</Text>
         </View>
 
         <QuantitySelector
@@ -113,6 +115,31 @@ export const CartItemRow: React.FC<CartItemRowProps> = ({
           <Text style={styles.lineTotalValue}>{formatLKR(item.lineTotal)}</Text>
         </View>
       </View>
+
+      {/* FIFO Batch Allocation Breakdown (Parity with Web POS) */}
+      {item.isPricingUnavailable || !item.allocations || item.allocations.length === 0 ? (
+        <View style={styles.fifoUnavailableBox}>
+          <AlertCircle size={14} color={Colors.danger} style={{ marginRight: 6 }} />
+          <Text style={styles.fifoUnavailableText}>
+            FIFO pricing unavailable: Real warehouse stock batch records are required to calculate billing.
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.fifoContainer}>
+          <Text style={styles.fifoHeaderTitle}>FIFO BATCH ALLOCATION</Text>
+          {item.allocations.map((alloc) => (
+            <View key={alloc.label + alloc.batchId} style={styles.fifoRow}>
+              <Text style={styles.fifoBatchLabel}>
+                {alloc.label} • Batch {alloc.batchNo}
+              </Text>
+              <Text style={styles.fifoBatchMath}>
+                {alloc.quantity} × {formatLKR(alloc.billingPrice)} ={" "}
+                <Text style={styles.fifoBatchTotal}>{formatLKR(alloc.lineTotal)}</Text>
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 };
@@ -269,6 +296,56 @@ const styles = StyleSheet.create({
     fontSize: Typography.base,
     fontWeight: "800",
     color: Colors.leaf
+  },
+  fifoContainer: {
+    backgroundColor: Colors.surfaceSubtle,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border
+  },
+  fifoHeaderTitle: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: Colors.textMuted,
+    letterSpacing: 0.8,
+    marginBottom: Spacing.xs
+  },
+  fifoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 2
+  },
+  fifoBatchLabel: {
+    fontSize: Typography.xs,
+    fontWeight: "700",
+    color: Colors.textPrimary
+  },
+  fifoBatchMath: {
+    fontSize: Typography.xs,
+    color: Colors.textSecondary
+  },
+  fifoBatchTotal: {
+    fontWeight: "800",
+    color: Colors.leaf
+  },
+  fifoUnavailableBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.dangerLight,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: "#fca5a5"
+  },
+  fifoUnavailableText: {
+    fontSize: Typography.xs,
+    color: Colors.danger,
+    fontWeight: "700",
+    flex: 1
   }
 });
 

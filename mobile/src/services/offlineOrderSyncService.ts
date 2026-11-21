@@ -100,19 +100,30 @@ export const offlineOrderSyncService = {
         });
       }
 
-      // Check Selling Price differences
-      if (liveProduct.currentSellingPrice !== item.sellingPrice) {
+      // Check Billing Price differences (Customer Billing Price is the calculation base)
+      const liveBillingPrice =
+        liveProduct.currentBillingPrice !== undefined
+          ? liveProduct.currentBillingPrice
+          : (liveProduct as any).customerBillingPrice;
+
+      const itemBillingPrice =
+        item.billingPrice !== undefined && item.billingPrice !== null && Number(item.billingPrice) > 0
+          ? Number(item.billingPrice)
+          : 0;
+
+      if (liveBillingPrice !== undefined && liveBillingPrice !== itemBillingPrice) {
         conflicts.push({
           type: "price_changed",
           itemCode: item.itemCode,
           itemName: item.displayName,
-          oldPrice: item.sellingPrice,
-          newPrice: liveProduct.currentSellingPrice,
-          message: `${item.itemCode}: Selling price updated from Rs. ${item.sellingPrice} to Rs. ${liveProduct.currentSellingPrice}.`
+          oldPrice: itemBillingPrice,
+          newPrice: liveBillingPrice,
+          message: `${item.itemCode}: Customer Billing price updated from Rs. ${itemBillingPrice} to Rs. ${liveBillingPrice}.`
         });
       }
 
-      authoritativeSubtotal += item.quantity * liveProduct.currentSellingPrice;
+      const effectiveBillingPrice = liveBillingPrice !== undefined ? liveBillingPrice : itemBillingPrice;
+      authoritativeSubtotal += item.quantity * effectiveBillingPrice;
     }
 
     // 4. Recalculate authoritative discount and net total (deducting proposed returns)

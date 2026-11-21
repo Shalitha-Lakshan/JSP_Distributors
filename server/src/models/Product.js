@@ -44,8 +44,13 @@ productSchema.pre("save", function (next) {
   next();
 });
 
-productSchema.index({ itemCode: 1 });
-productSchema.index({ barcode: 1 });
+productSchema.virtual("customerBillingPrice").get(function () {
+  return this.currentBillingPrice;
+});
+
+productSchema.set("toJSON", { virtuals: true });
+productSchema.set("toObject", { virtuals: true });
+
 productSchema.index({ productName: "text", displayName: "text" });
 productSchema.index({ searchKeywords: 1 });
 productSchema.index({ category: 1 });

@@ -124,7 +124,17 @@ const PosPage = () => {
     const { data: batches = [] } = await api.get(`/api/stock/product/${productId}`, {
       headers: authHeader
     });
-    const availableBatches = (batches || []).filter((b) => Number(b.remainingQty || 0) > 0);
+    const availableBatches = (batches || [])
+      .filter((b) => Number(b.remainingQty || 0) > 0)
+      .sort((a, b) => {
+        const dateA = new Date(a.receivedDate || a.createdAt || 0).getTime();
+        const dateB = new Date(b.receivedDate || b.createdAt || 0).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        const createdA = new Date(a.createdAt || 0).getTime();
+        const createdB = new Date(b.createdAt || 0).getTime();
+        if (createdA !== createdB) return createdA - createdB;
+        return String(a.batchNo || a._id).localeCompare(String(b.batchNo || b._id));
+      });
     let remaining = qty;
     let billingTotal = 0;
     const usedBatches = [];

@@ -9,6 +9,8 @@ export interface InvoicePdfOptions {
   isOrder?: boolean;
   routeName?: string;
   repName?: string;
+  batches?: any[];
+  batchMap?: Map<string, number> | Record<string, number>;
 }
 
 export const COMPANY_DETAILS = {
@@ -76,28 +78,205 @@ export const generateInvoiceHtml = (
   const cashierObj = typeof doc.cashier === "object" && doc.cashier !== null ? doc.cashier : null;
   const repName = cashierObj?.name ? escapeHtml(cashierObj.name) : options?.repName || "Field Sales Rep";
 
+  // Batch price lookup map from options (if provided)
+  const batchLookup = new Map<string, { sellingPrice?: number; billingPrice?: number }>();
+  if (options?.batchMap) {
+    if (options.batchMap instanceof Map) {
+      options.batchMap.forEach((v, k) => batchLookup.set(k, { sellingPrice: v }));
+    } else {
+      Object.entries(options.batchMap).forEach(([k, v]) => batchLookup.set(k, { sellingPrice: Number(v) }));
+    }
+  }
+  if (Array.isArray(options?.batches)) {
+    options.batches.forEach((b: any) => {
+      const sp = b.sellingPrice !== undefined && Number(b.sellingPrice) > 0 ? Number(b.sellingPrice) : undefined;
+      const bp = b.billingPrice !== undefined && Number(b.billingPrice) > 0 ? Number(b.billingPrice) : undefined;
+      if (b._id) batchLookup.set(String(b._id), { sellingPrice: sp, billingPrice: bp });
+      if (b.batchId) batchLookup.set(String(b.batchId), { sellingPrice: sp, billingPrice: bp });
+      if (b.batchNo) batchLookup.set(String(b.batchNo), { sellingPrice: sp, billingPrice: bp });
+    });
+  }
+
   // Items
   const items = doc.items || [];
   const itemsRowsHtml = items
     .map((item: any) => {
       const itemCode = escapeHtml(item.itemCode || "-");
-      const name = escapeHtml(item.itemName || item.product?.name || "Product");
+      const name = escapeHtml(item.itemName || item.product?.displayName || item.product?.name || "Product");
       const qty = Number(item.quantity || 0);
-      const unitPrice = Number(item.sellingPrice || item.unitPrice || 0);
-      const lineTotal = Number(item.lineTotal || qty * unitPrice);
 
-      const rateFormatted = splitRsCts(unitPrice);
+      // Customer Billing Unit Price (Authoritative calculation base)
+      const billingPrice =
+        item.billingPrice !== undefined && item.billingPrice !== null
+          ? Number(item.billingPrice)
+          : item.unitPrice !== undefined && item.unitPrice !== null
+          ? Number(item.unitPrice)
+          : 0;
+
+      // Line Total calculated strictly from Billing Price
+      const lineTotal = Number(
+        item.lineTotal !== undefined && item.lineTotal !== null
+          ? item.lineTotal
+          : qty * billingPrice
+      );
+
+      const usedBatches = Array.isArray(item.usedBatches)
+        ? item.usedBatches
+        : Array.isArray(item.allocations)
+        ? item.allocations
+        : [];
+
+      // Parent item-level selling price snapshot
+      const rawItemSelling =
+        item.sellingPrice !== undefined &&
+        item.sellingPrice !== null &&
+        !isNaN(Number(item.sellingPrice)) &&
+        Number(item.sellingPrice) > 0
+          ? Number(item.sellingPrice)
+          : typeof item.product === "object" && item.product !== null && Number(item.product.currentSellingPrice) > 0
+          ? Number(item.product.currentSellingPrice)
+          : null;
+
+      // Normalize each allocated FIFO stock batch
+      const processedBatches = usedBatches.map((b: any, bIdx: number) => {
+        const rawBatchQty =
+          b.quantity !== undefined && b.quantity !== null
+            ? b.quantity
+            : b.qty !== undefined && b.qty !== null
+            ? b.qty
+            : 0;
+        const bQty = Number(rawBatchQty);
+        const validBQty = !isNaN(bQty) && bQty > 0 ? bQty : 0;
+
+        const bBilling = Number(
+          b.billingPrice !== undefined && b.billingPrice !== null ? b.billingPrice : billingPrice
+        );
+        const bLineTotal = Number(
+          b.lineTotal !== undefined && b.lineTotal !== null ? b.lineTotal : validBQty * bBilling
+        );
+
+        // Resolve display-only reference selling price for this specific batch
+        let bSelling: number | null = null;
+        if (
+          b.sellingPrice !== undefined &&
+          b.sellingPrice !== null &&
+          !isNaN(Number(b.sellingPrice)) &&
+          Number(b.sellingPrice) > 0
+        ) {
+          bSelling = Number(b.sellingPrice);
+        } else if (typeof b.batchId === "object" && b.batchId !== null && Number(b.batchId.sellingPrice) > 0) {
+          bSelling = Number(b.batchId.sellingPrice);
+        } else if (b.batchId && batchLookup.has(String(b.batchId)) && batchLookup.get(String(b.batchId))?.sellingPrice) {
+          bSelling = batchLookup.get(String(b.batchId))!.sellingPrice!;
+        } else if (b.batchNo && batchLookup.has(String(b.batchNo)) && batchLookup.get(String(b.batchNo))?.sellingPrice) {
+          bSelling = batchLookup.get(String(b.batchNo))!.sellingPrice!;
+        } else if (Array.isArray(item.batches)) {
+          const matched = item.batches.find(
+            (ib: any) =>
+              (b.batchId && String(ib._id || ib.batchId) === String(b.batchId)) ||
+              (b.batchNo && ib.batchNo === b.batchNo)
+          );
+          if (matched && Number(matched.sellingPrice) > 0) {
+            bSelling = Number(matched.sellingPrice);
+          }
+        }
+
+        // If batch selling price still missing, fallback to item-level selling price snapshot
+        if (bSelling === null && rawItemSelling !== null) {
+          bSelling = rawItemSelling;
+        }
+
+        return {
+          batchId: b.batchId,
+          batchNo: b.batchNo || "-",
+          label: b.label || `F${bIdx + 1}`,
+          qty: validBQty,
+          billingPrice: bBilling,
+          sellingPrice: bSelling,
+          lineTotal: bLineTotal
+        };
+      });
+
+      // MULTI-BATCH PRESENTATION:
+      // When multiple FIFO batches exist, render:
+      // 1. Master product row showing total quantity & aggregate line total,
+      //    with Unit Prices marked '-' to prevent misleading average unit rates.
+      // 2. Clear, itemized sub-rows per FIFO allocation with exact batch numbers,
+      //    positive allocated quantities, batch selling price reference, batch billing price, and batch amount.
+      if (processedBatches.length > 1) {
+        const lineFormatted = splitRsCts(lineTotal);
+
+        const subRowsHtml = processedBatches
+          .map((b: any) => {
+            const bSellingFormatted = b.sellingPrice !== null ? splitRsCts(b.sellingPrice) : null;
+            const bBillingFormatted = splitRsCts(b.billingPrice);
+            const bLineFormatted = splitRsCts(b.lineTotal);
+            const bLabel = escapeHtml(b.label);
+            const bNo = escapeHtml(b.batchNo);
+
+            return `
+              <tr style="background-color: #f8fafc; font-size: 9.5px; color: #334155;">
+                <td style="font-family: monospace; font-weight: 700; text-align: center; color: #0f766e; width: 14%;">
+                  ↳ ${itemCode} (${bLabel})
+                </td>
+                <td style="text-align: left; padding-left: 14px; font-family: monospace; color: #475569; width: 32%;">
+                  Batch ${bNo}
+                </td>
+                <td style="text-align: center; font-weight: 700; font-family: monospace; color: #0f172a; width: 8%;">
+                  ${b.qty}
+                </td>
+                ${
+                  bSellingFormatted
+                    ? `<td style="text-align: right; font-family: monospace; color: #64748b; width: 10%;">${bSellingFormatted.rs}</td>
+                       <td style="text-align: center; font-family: monospace; color: #64748b; width: 5%;">${bSellingFormatted.cts}</td>`
+                    : `<td colspan="2" style="text-align: center; font-family: monospace; color: #94a3b8; width: 15%;">N/A</td>`
+                }
+                <td style="text-align: right; font-family: monospace; font-weight: 700; width: 10%;">${bBillingFormatted.rs}</td>
+                <td style="text-align: center; font-family: monospace; font-weight: 700; width: 5%;">${bBillingFormatted.cts}</td>
+                <td style="text-align: right; font-family: monospace; font-weight: 700; width: 11%;">${bLineFormatted.rs}</td>
+                <td style="text-align: center; font-family: monospace; font-weight: 700; width: 5%;">${bLineFormatted.cts}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        return `
+          <tr style="font-weight: 600;">
+            <td style="font-family: monospace; font-weight: bold; width: 14%; text-align: center;">${itemCode}</td>
+            <td style="font-weight: 700; text-align: left; width: 32%;">${name}</td>
+            <td style="text-align: center; font-weight: bold; font-family: monospace; width: 8%;">${qty}</td>
+            <td colspan="2" style="text-align: center; font-family: monospace; color: #94a3b8; width: 15%; font-size: 8.5px;">-</td>
+            <td colspan="2" style="text-align: center; font-family: monospace; color: #94a3b8; width: 15%; font-size: 8.5px;">-</td>
+            <td style="text-align: right; font-family: monospace; font-weight: bold; width: 11%;">${lineFormatted.rs}</td>
+            <td style="text-align: center; font-family: monospace; font-weight: bold; width: 5%;">${lineFormatted.cts}</td>
+          </tr>
+          ${subRowsHtml}
+        `;
+      }
+
+      // SINGLE-BATCH OR LEGACY ROW:
+      const singleBatch = processedBatches.length === 1 ? processedBatches[0] : null;
+      const effectiveBilling = singleBatch ? singleBatch.billingPrice : billingPrice;
+      const effectiveSelling = singleBatch?.sellingPrice ?? rawItemSelling;
+      const billingFormatted = splitRsCts(effectiveBilling);
+      const sellingFormatted = effectiveSelling !== null ? splitRsCts(effectiveSelling) : null;
       const lineFormatted = splitRsCts(lineTotal);
 
       return `
         <tr>
-          <td style="font-family: monospace; font-weight: bold; width: 14%;">${itemCode}</td>
-          <td style="font-weight: 600; text-align: left; width: 38%;">${name}</td>
-          <td style="text-align: right; font-family: monospace; width: 11%;">${rateFormatted.rs}</td>
-          <td style="text-align: center; font-family: monospace; width: 6%;">${rateFormatted.cts}</td>
-          <td style="text-align: center; font-weight: bold; font-family: monospace; width: 9%;">${qty}</td>
-          <td style="text-align: right; font-family: monospace; font-weight: bold; width: 15%;">${lineFormatted.rs}</td>
-          <td style="text-align: center; font-family: monospace; font-weight: bold; width: 7%;">${lineFormatted.cts}</td>
+          <td style="font-family: monospace; font-weight: bold; width: 14%; text-align: center;">${itemCode}</td>
+          <td style="font-weight: 600; text-align: left; width: 32%;">${name}</td>
+          <td style="text-align: center; font-weight: bold; font-family: monospace; width: 8%;">${qty}</td>
+          ${
+            sellingFormatted
+              ? `<td style="text-align: right; font-family: monospace; color: #475569; width: 10%;">${sellingFormatted.rs}</td>
+                 <td style="text-align: center; font-family: monospace; color: #475569; width: 5%;">${sellingFormatted.cts}</td>`
+              : `<td colspan="2" style="text-align: center; font-family: monospace; color: #94a3b8; width: 15%;">N/A</td>`
+          }
+          <td style="text-align: right; font-family: monospace; font-weight: bold; width: 10%;">${billingFormatted.rs}</td>
+          <td style="text-align: center; font-family: monospace; font-weight: bold; width: 5%;">${billingFormatted.cts}</td>
+          <td style="text-align: right; font-family: monospace; font-weight: bold; width: 11%;">${lineFormatted.rs}</td>
+          <td style="text-align: center; font-family: monospace; font-weight: bold; width: 5%;">${lineFormatted.cts}</td>
         </tr>
       `;
     })
@@ -496,23 +675,26 @@ export const generateInvoiceHtml = (
       <thead>
         <tr>
           <th rowspan="2" style="width: 14%;">Item Code</th>
-          <th rowspan="2" style="width: 38%; text-align: left;">Product Description</th>
-          <th colspan="2" style="width: 17%;">Rate</th>
-          <th rowspan="2" style="width: 9%;">Qty.</th>
-          <th colspan="2" style="width: 22%;">Amount</th>
+          <th rowspan="2" style="width: 32%; text-align: left;">Product Description</th>
+          <th rowspan="2" style="width: 8%;">Qty.</th>
+          <th colspan="2" style="width: 15%;">Selling Price<br><span style="font-size: 8px; font-weight: normal; text-transform: none;">(Ref. Only)</span></th>
+          <th colspan="2" style="width: 15%;">Billing Price</th>
+          <th colspan="2" style="width: 16%;">Amount</th>
         </tr>
         <tr>
-          <th style="border-top: 1px solid #000; width: 11%;">Rs.</th>
-          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 6%;">Cts.</th>
-          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 15%;">Rs.</th>
-          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 7%;">Cts.</th>
+          <th style="border-top: 1px solid #000; width: 10%;">Rs.</th>
+          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 5%;">Cts.</th>
+          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 10%;">Rs.</th>
+          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 5%;">Cts.</th>
+          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 11%;">Rs.</th>
+          <th style="border-top: 1px solid #000; border-left: 1px solid #000; width: 5%;">Cts.</th>
         </tr>
       </thead>
       <tbody>
         ${
           itemsRowsHtml ||
           `<tr>
-            <td colspan="7" style="text-align: center; color: #475569; padding: 12px;">No items fulfilled</td>
+            <td colspan="9" style="text-align: center; color: #475569; padding: 12px;">No items fulfilled</td>
           </tr>`
         }
       </tbody>
@@ -722,7 +904,9 @@ export const printInvoice = async (
 ): Promise<void> => {
   const html = generateInvoiceHtml(doc, options);
   await Print.printAsync({
-    html
+    html,
+    width: 595,
+    height: 842
   });
 };
 

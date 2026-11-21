@@ -26,7 +26,8 @@ export interface OfflineOrderItem {
   displayName: string;
   variant?: string;
   quantity: number;
-  sellingPrice: number; // Last known selling price
+  billingPrice: number; // Customer Billing Price
+  sellingPrice: number; // Last known reference selling price
   estimatedLineTotal: number;
   totalStockSnapshot?: number; // Last known stock at time of drafting
 }

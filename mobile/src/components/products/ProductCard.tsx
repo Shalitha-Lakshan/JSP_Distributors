@@ -42,7 +42,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const isGajamuthu = product.supplier === "Gajamuthu Foods";
   const isOutOfStock = product.totalStock <= 0;
   const isMaxInCart = product.totalStock > 0 && cartQuantity >= product.totalStock;
-  const canAddToCart = !isOutOfStock && !isMaxInCart;
+
+  const numBilling =
+    product.currentBillingPrice !== undefined
+      ? Number(product.currentBillingPrice)
+      : (product as any).customerBillingPrice !== undefined
+      ? Number((product as any).customerBillingPrice)
+      : (product as any).billingPrice !== undefined
+      ? Number((product as any).billingPrice)
+      : 0;
+
+  const hasValidBillingPrice = !isNaN(numBilling) && numBilling > 0;
+  const billingPrice = hasValidBillingPrice ? numBilling : null;
+
+  const canAddToCart = !isOutOfStock && !isMaxInCart && hasValidBillingPrice;
 
   return (
     <View
@@ -109,10 +122,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       {/* Bottom Pricing & Stock Row */}
       <View style={styles.bottomRow}>
         <View style={styles.priceColumn}>
-          <Text style={[styles.priceLabel, { color: theme.textMuted }]}>SELLING PRICE</Text>
-          <Text style={[styles.priceValue, { color: theme.textPrimary }, isOutOfStock && styles.priceValueMuted]}>
-            {formatLKR(product.currentSellingPrice)}
+          <Text style={[styles.priceLabel, { color: theme.textMuted }]}>
+            {product.hasMultiplePrices ? "FIFO BILLING" : "BILLING PRICE"}
           </Text>
+          {hasValidBillingPrice ? (
+            <Text
+              style={[
+                styles.priceValue,
+                { color: isDark ? theme.leafLight || "#4ade80" : Colors.leaf },
+                isOutOfStock && styles.priceValueMuted
+              ]}
+            >
+              {product.hasMultiplePrices && product.minBillingPrice !== undefined
+                ? `From ${formatLKR(product.minBillingPrice)}`
+                : formatLKR(billingPrice!)}
+            </Text>
+          ) : (
+            <Text style={[styles.priceUnavailableText, { color: theme.danger }]}>
+              Billing Price Unavailable
+            </Text>
+          )}
         </View>
 
         <View style={styles.stockColumn}>
@@ -147,7 +176,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             hitSlop={6}
             activeOpacity={canAddToCart ? 0.8 : 1}
             accessibilityLabel={
-              isOutOfStock
+              !hasValidBillingPrice
+                ? `${product.displayName}: Billing Price Unavailable`
+                : isOutOfStock
                 ? `${product.displayName} is out of stock`
                 : isMaxInCart
                 ? `Maximum stock (${product.totalStock}) already in cart`
@@ -273,19 +304,23 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm + 2
   },
   priceColumn: {
-    flex: 1
+    flex: 1,
+    justifyContent: "flex-end"
   },
   priceLabel: {
     fontSize: 10,
-    fontWeight: "700",
-    color: Colors.textMuted,
+    fontWeight: "800",
     letterSpacing: 0.5,
     marginBottom: 2
   },
   priceValue: {
     fontSize: Typography.lg,
-    fontWeight: "800",
-    color: Colors.leaf
+    fontWeight: "800"
+  },
+  priceUnavailableText: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 1
   },
   stockColumn: {
     alignItems: "flex-end",

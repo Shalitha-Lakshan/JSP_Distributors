@@ -46,6 +46,7 @@ export interface OfflineOrderItemRow {
   variant: string | null;
   quantity: number;
   sellingPrice: number;
+  billingPrice?: number;
   estimatedLineTotal: number;
   totalStockSnapshot: number;
 }
@@ -111,8 +112,8 @@ export const offlineOrdersRepository = {
           `INSERT INTO offline_order_items (
             id, orderDraftId, userId, productId, itemCode,
             productName, displayName, variant, quantity,
-            sellingPrice, estimatedLineTotal, totalStockSnapshot
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            sellingPrice, billingPrice, estimatedLineTotal, totalStockSnapshot
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             item.id,
             draft.id,
@@ -124,6 +125,7 @@ export const offlineOrdersRepository = {
             item.variant || null,
             item.quantity,
             item.sellingPrice,
+            item.billingPrice || 0,
             item.estimatedLineTotal,
             item.totalStockSnapshot || 0
           ]
@@ -176,6 +178,10 @@ export const offlineOrdersRepository = {
         variant: item.variant || undefined,
         quantity: item.quantity,
         sellingPrice: item.sellingPrice,
+        billingPrice:
+          item.billingPrice !== undefined && item.billingPrice !== null && Number(item.billingPrice) > 0
+            ? Number(item.billingPrice)
+            : 0,
         estimatedLineTotal: item.estimatedLineTotal,
         totalStockSnapshot: item.totalStockSnapshot
       });
@@ -243,6 +249,10 @@ export const offlineOrdersRepository = {
       displayName: item.displayName,
       variant: item.variant || undefined,
       quantity: item.quantity,
+      billingPrice:
+        item.billingPrice !== undefined && item.billingPrice !== null && Number(item.billingPrice) > 0
+          ? Number(item.billingPrice)
+          : 0,
       sellingPrice: item.sellingPrice,
       estimatedLineTotal: item.estimatedLineTotal,
       totalStockSnapshot: item.totalStockSnapshot

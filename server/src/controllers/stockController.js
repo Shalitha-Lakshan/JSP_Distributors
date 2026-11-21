@@ -77,7 +77,7 @@ const listBatchesForProduct = async (req, res) => {
   const batches = await StockBatch.find({ productId: req.params.productId })
     .populate("productId", "displayName itemCode variant category")
     .populate("createdBy", "name")
-    .sort({ receivedDate: 1 });
+    .sort({ receivedDate: 1, createdAt: 1, _id: 1 });
   return res.json(batches);
 };
 

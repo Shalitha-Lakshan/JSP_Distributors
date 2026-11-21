@@ -8,7 +8,7 @@
  * - Offline Van Order drafts store stable idempotency keys for reliable replay.
  */
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 export const CREATE_TABLES_SQL = `
   PRAGMA journal_mode = WAL;
@@ -25,6 +25,8 @@ export const CREATE_TABLES_SQL = `
     categoryName TEXT,
     supplier TEXT NOT NULL,
     currentSellingPrice REAL NOT NULL,
+    currentBillingPrice REAL NOT NULL DEFAULT 0,
+    batches TEXT,
     totalStock INTEGER NOT NULL,
     reorderLevel INTEGER DEFAULT 0,
     isFastMoving INTEGER DEFAULT 0,
@@ -144,6 +146,7 @@ export const CREATE_TABLES_SQL = `
     variant TEXT,
     quantity INTEGER NOT NULL,
     sellingPrice REAL NOT NULL,
+    billingPrice REAL NOT NULL DEFAULT 0,
     estimatedLineTotal REAL NOT NULL,
     totalStockSnapshot INTEGER DEFAULT 0,
     FOREIGN KEY (orderDraftId) REFERENCES offline_orders(id) ON DELETE CASCADE

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -26,6 +26,7 @@ interface InvoicePreviewModalProps {
   visible: boolean;
   doc: Sale | Order | null;
   isOrder?: boolean;
+  batches?: any[];
   onClose: () => void;
 }
 
@@ -33,12 +34,27 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
   visible,
   doc,
   isOrder: forceOrder,
+  batches,
   onClose
 }) => {
   const { theme, isDark } = useAppTheme();
   const { isTablet } = useResponsive();
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+
+  const batchLookup = useMemo(() => {
+    const map = new Map<string, { sellingPrice?: number; billingPrice?: number }>();
+    if (Array.isArray(batches)) {
+      batches.forEach((b: any) => {
+        const sp = b.sellingPrice !== undefined && Number(b.sellingPrice) > 0 ? Number(b.sellingPrice) : undefined;
+        const bp = b.billingPrice !== undefined && Number(b.billingPrice) > 0 ? Number(b.billingPrice) : undefined;
+        if (b._id) map.set(String(b._id), { sellingPrice: sp, billingPrice: bp });
+        if (b.batchId) map.set(String(b.batchId), { sellingPrice: sp, billingPrice: bp });
+        if (b.batchNo) map.set(String(b.batchNo), { sellingPrice: sp, billingPrice: bp });
+      });
+    }
+    return map;
+  }, [batches]);
 
   if (!visible || !doc) return null;
 
@@ -257,32 +273,167 @@ export const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({
             <View style={styles.tableWrap}>
               {/* Table Header */}
               <View style={styles.tableHeaderRow}>
-                <Text style={[styles.th, { width: "16%" }]}>Item Code</Text>
-                <Text style={[styles.th, { flex: 1, textAlign: "left", paddingLeft: 6 }]}>Product</Text>
-                <Text style={[styles.th, { width: "20%", textAlign: "right" }]}>Rate (Rs.)</Text>
-                <Text style={[styles.th, { width: "12%", textAlign: "center" }]}>Qty</Text>
-                <Text style={[styles.th, { width: "24%", textAlign: "right" }]}>Amount (Rs.)</Text>
+                <Text style={[styles.th, { width: "14%" }]}>Item Code</Text>
+                <Text style={[styles.th, { flex: 1, textAlign: "left", paddingLeft: 4 }]}>Product</Text>
+                <Text style={[styles.th, { width: "8%", textAlign: "center" }]}>Qty</Text>
+                <Text style={[styles.th, { width: "18%", textAlign: "right" }]}>Selling (Ref)</Text>
+                <Text style={[styles.th, { width: "18%", textAlign: "right" }]}>Billing Price</Text>
+                <Text style={[styles.th, { width: "20%", textAlign: "right" }]}>Amount (Rs.)</Text>
               </View>
 
               {/* Table Rows */}
               {items.map((item: any, idx: number) => {
                 const code = item.itemCode || "-";
-                const name = item.itemName || item.product?.name || "Product";
+                const name =
+                  item.itemName ||
+                  item.product?.displayName ||
+                  item.product?.productName ||
+                  item.product?.name ||
+                  "Product";
                 const qty = item.quantity || 0;
-                const price = item.sellingPrice || item.unitPrice || 0;
-                const lineTotal = item.lineTotal || qty * price;
+                const billingPrice =
+                  item.billingPrice !== undefined && item.billingPrice !== null
+                    ? Number(item.billingPrice)
+                    : item.unitPrice !== undefined && item.unitPrice !== null
+                    ? Number(item.unitPrice)
+                    : 0;
+                const lineTotal =
+                  item.lineTotal !== undefined && item.lineTotal !== null
+                    ? Number(item.lineTotal)
+                    : qty * billingPrice;
+
+                const usedBatches = Array.isArray(item.usedBatches)
+                  ? item.usedBatches
+                  : Array.isArray(item.allocations)
+                  ? item.allocations
+                  : [];
+
+                const rawItemSelling =
+                  item.sellingPrice !== undefined &&
+                  item.sellingPrice !== null &&
+                  !isNaN(Number(item.sellingPrice)) &&
+                  Number(item.sellingPrice) > 0
+                    ? Number(item.sellingPrice)
+                    : typeof item.product === "object" && item.product !== null && Number(item.product.currentSellingPrice) > 0
+                    ? Number(item.product.currentSellingPrice)
+                    : null;
+
+                const processedBatches = usedBatches.map((b: any, bIdx: number) => {
+                  const rawBatchQty =
+                    b.quantity !== undefined && b.quantity !== null
+                      ? b.quantity
+                      : b.qty !== undefined && b.qty !== null
+                      ? b.qty
+                      : 0;
+                  const bQty = Number(rawBatchQty);
+                  const validBQty = !isNaN(bQty) && bQty > 0 ? bQty : 0;
+                  const bBilling = Number(
+                    b.billingPrice !== undefined && b.billingPrice !== null ? b.billingPrice : billingPrice
+                  );
+                  const bLineTotal = Number(
+                    b.lineTotal !== undefined && b.lineTotal !== null ? b.lineTotal : validBQty * bBilling
+                  );
+
+                  let bSelling: number | null = null;
+                  if (
+                    b.sellingPrice !== undefined &&
+                    b.sellingPrice !== null &&
+                    !isNaN(Number(b.sellingPrice)) &&
+                    Number(b.sellingPrice) > 0
+                  ) {
+                    bSelling = Number(b.sellingPrice);
+                  } else if (typeof b.batchId === "object" && b.batchId !== null && Number(b.batchId.sellingPrice) > 0) {
+                    bSelling = Number(b.batchId.sellingPrice);
+                  } else if (b.batchId && batchLookup.has(String(b.batchId)) && batchLookup.get(String(b.batchId))?.sellingPrice) {
+                    bSelling = batchLookup.get(String(b.batchId))!.sellingPrice!;
+                  } else if (b.batchNo && batchLookup.has(String(b.batchNo)) && batchLookup.get(String(b.batchNo))?.sellingPrice) {
+                    bSelling = batchLookup.get(String(b.batchNo))!.sellingPrice!;
+                  } else if (Array.isArray(item.batches)) {
+                    const matched = item.batches.find(
+                      (ib: any) =>
+                        (b.batchId && String(ib._id || ib.batchId) === String(b.batchId)) ||
+                        (b.batchNo && ib.batchNo === b.batchNo)
+                    );
+                    if (matched && Number(matched.sellingPrice) > 0) {
+                      bSelling = Number(matched.sellingPrice);
+                    }
+                  }
+
+                  if (bSelling === null && rawItemSelling !== null) {
+                    bSelling = rawItemSelling;
+                  }
+
+                  return {
+                    batchId: b.batchId,
+                    batchNo: b.batchNo || "-",
+                    label: b.label || `F${bIdx + 1}`,
+                    qty: validBQty,
+                    billingPrice: bBilling,
+                    sellingPrice: bSelling,
+                    lineTotal: bLineTotal
+                  };
+                });
+
+                const isMultiBatch = processedBatches.length > 1;
+                const sellingPriceStr = isMultiBatch
+                  ? "-"
+                  : rawItemSelling !== null
+                  ? Number(rawItemSelling).toLocaleString("en-LK", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })
+                  : "N/A";
+
+                const billingPriceStr = isMultiBatch
+                  ? "-"
+                  : Number(billingPrice).toLocaleString("en-LK", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    });
 
                 return (
-                  <View key={idx} style={[styles.tableDataRow, idx % 2 === 1 && styles.rowAlt]}>
-                    <Text style={[styles.tdCode, { width: "16%" }]}>{code}</Text>
-                    <Text style={[styles.tdName, { flex: 1 }]} numberOfLines={2}>{name}</Text>
-                    <Text style={[styles.tdNum, { width: "20%" }]}>
-                      {Number(price).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
-                    <Text style={[styles.tdQty, { width: "12%" }]}>{qty}</Text>
-                    <Text style={[styles.tdLineTotal, { width: "24%" }]}>
-                      {Number(lineTotal).toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
+                  <View key={idx} style={idx % 2 === 1 ? styles.rowAlt : undefined}>
+                    <View style={styles.tableDataRow}>
+                      <Text style={[styles.tdCode, { width: "14%" }]}>{code}</Text>
+                      <Text style={[styles.tdName, { flex: 1 }]} numberOfLines={2}>
+                        {name}
+                      </Text>
+                      <Text style={[styles.tdQty, { width: "8%" }]}>{qty}</Text>
+                      <Text style={[styles.tdNum, { width: "18%", color: "#64748b" }]}>
+                        {sellingPriceStr}
+                      </Text>
+                      <Text style={[styles.tdNum, { width: "18%", fontWeight: "700" }]}>
+                        {billingPriceStr}
+                      </Text>
+                      <Text style={[styles.tdLineTotal, { width: "20%" }]}>
+                        {Number(lineTotal).toLocaleString("en-LK", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}
+                      </Text>
+                    </View>
+                    {isMultiBatch && (
+                      <View style={styles.batchSubWrap}>
+                        {processedBatches.map((b: any, bIdx: number) => (
+                          <View key={bIdx} style={styles.batchSubRow}>
+                            <Text style={styles.batchSubLabel}>
+                              ↳ {code} ({b.label}) • Batch {b.batchNo}: {b.qty} × Rs.{" "}
+                              {Number(b.billingPrice).toFixed(2)}
+                              {b.sellingPrice
+                                ? `  [Sell: Rs. ${Number(b.sellingPrice).toFixed(2)}]`
+                                : ""}
+                            </Text>
+                            <Text style={styles.batchSubTotal}>
+                              Rs.{" "}
+                              {Number(b.lineTotal).toLocaleString("en-LK", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                              })}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
                   </View>
                 );
               })}
@@ -666,6 +817,30 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
     textAlign: "right",
     color: Colors.ink
+  },
+  batchSubWrap: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0"
+  },
+  batchSubRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 1
+  },
+  batchSubLabel: {
+    fontSize: 9.5,
+    fontFamily: "monospace",
+    color: "#475569"
+  },
+  batchSubTotal: {
+    fontSize: 9.5,
+    fontFamily: "monospace",
+    fontWeight: "700",
+    color: Colors.leaf
   },
   emptyRow: {
     padding: 12,

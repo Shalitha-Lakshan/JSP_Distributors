@@ -37,6 +37,33 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase | null> {
         // Column already exists or table was just created with proposedReturns
       }
 
+      // Safe migrations for Customer Billing Price and FIFO Batches
+      try {
+        await db.execAsync("ALTER TABLE cached_products ADD COLUMN currentBillingPrice REAL DEFAULT 0;");
+      } catch {
+        // Column already exists
+      }
+      try {
+        await db.execAsync("ALTER TABLE cached_products ADD COLUMN batches TEXT;");
+      } catch {
+        // Column already exists
+      }
+      try {
+        await db.execAsync("ALTER TABLE offline_order_items ADD COLUMN billingPrice REAL DEFAULT 0;");
+      } catch {
+        // Column already exists
+      }
+
+      // Safe cache cleanup: purge stale cached product rows that had 0 or null billing price
+      // This forces a clean refresh from the server while preserving all offline orders and drafts.
+      try {
+        await db.execAsync(
+          "DELETE FROM cached_products WHERE currentBillingPrice <= 0 OR currentBillingPrice IS NULL;"
+        );
+      } catch {
+        // Ignored
+      }
+
       dbInstance = db;
       return db;
     } catch (err) {

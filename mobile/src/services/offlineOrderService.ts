@@ -78,6 +78,7 @@ export const offlineOrderService = {
       displayName: item.displayName || item.productName,
       variant: item.variant || undefined,
       quantity: item.quantity,
+      billingPrice: item.billingPrice,
       sellingPrice: item.sellingPrice,
       estimatedLineTotal: item.lineTotal,
       totalStockSnapshot: item.totalStock

@@ -41,6 +41,7 @@ const itemColumns = db.prepare("PRAGMA table_info(offline_order_items)").all().m
 console.log("offline_order_items columns:", itemColumns);
 assert(itemColumns.includes("orderDraftId"), "offline_order_items must reference orderDraftId");
 assert(itemColumns.includes("sellingPrice"), "offline_order_items must store sellingPrice");
+assert(itemColumns.includes("billingPrice"), "offline_order_items must store billingPrice");
 assert(itemColumns.includes("estimatedLineTotal"), "offline_order_items must store estimatedLineTotal");
 console.log("PASS: Required schema fields verified.");
 
@@ -85,9 +86,9 @@ insertDraftStmt.run(
 const insertItemStmt = db.prepare(`
   INSERT INTO offline_order_items (
     id, orderDraftId, userId, productId, itemCode, productName,
-    displayName, variant, quantity, sellingPrice,
+    displayName, variant, quantity, sellingPrice, billingPrice,
     estimatedLineTotal, totalStockSnapshot
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 insertItemStmt.run(
@@ -101,7 +102,8 @@ insertItemStmt.run(
   "500mg",
   10,
   200,
-  2000,
+  160,
+  1600,
   50
 );
 
@@ -116,7 +118,8 @@ insertItemStmt.run(
   "250mg",
   15,
   200,
-  3000,
+  180,
+  2700,
   40
 );
 
@@ -185,7 +188,8 @@ insertItemStmt.run(
   "500mg",
   5, // changed to 5
   200,
-  1000,
+  160,
+  800,
   50
 );
 

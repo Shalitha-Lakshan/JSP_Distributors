@@ -92,6 +92,8 @@ export const MarketReturnModal: React.FC<MarketReturnModalProps> = ({
           variant: "",
           category: "",
           currentSellingPrice: initialReturn.returnPrice,
+          currentBillingPrice: initialReturn.returnPrice,
+          customerBillingPrice: initialReturn.returnPrice,
           totalStock: 0,
           reorderLevel: 0,
           isFastMoving: false,

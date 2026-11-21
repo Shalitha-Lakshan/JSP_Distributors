@@ -327,7 +327,10 @@ export const OrderDeliveryModal: React.FC<OrderDeliveryModalProps> = ({
                   <View key={idx} style={[styles.itemRow, { borderBottomColor: theme.border }]}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.itemName, { color: theme.textPrimary }]}>{item.itemName}</Text>
-                      <Text style={[styles.itemCode, { color: theme.textSecondary }]}>{item.itemCode} • Qty: {item.quantity}</Text>
+                      <Text style={[styles.itemCode, { color: theme.textSecondary }]}>
+                        {item.itemCode} • Qty: {item.quantity} @ {formatLKR(item.billingPrice || item.unitPrice)}
+                        {item.sellingPrice ? ` (Ref: ${formatLKR(item.sellingPrice)})` : ""}
+                      </Text>
                     </View>
                     <Text style={[styles.itemTotal, { color: theme.textPrimary }]}>{formatLKR(item.lineTotal)}</Text>
                   </View>

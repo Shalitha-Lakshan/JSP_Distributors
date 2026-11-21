@@ -119,9 +119,10 @@ export default function ProductsScreen() {
       } catch (err) {
         if (user?.id) {
           const cached = await productsRepository.getProducts(user.id);
-          if (cached.length > 0) {
+          const validCached = cached.filter((p) => (p.currentBillingPrice || 0) > 0);
+          if (validCached.length > 0) {
             await refreshSyncMetadata();
-            return cached;
+            return validCached;
           }
         }
         throw err;
@@ -396,7 +397,7 @@ export default function ProductsScreen() {
           product={productForQuantity}
           visible={!!productForQuantity}
           onClose={() => setProductForQuantity(null)}
-          onAddToCart={(p, qty) => addItem(p, qty)}
+          onAddToCart={(p, qty, allocs) => addItem(p, qty, allocs)}
           cartQuantity={cartItems.find((i) => i.productId === productForQuantity?._id)?.quantity || 0}
         />
 

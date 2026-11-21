@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import { CartItem, Customer, PaymentMethod, Product, ReturnItem } from "../types";
+import { CartItem, Customer, FifoAllocation, PaymentMethod, Product, ReturnItem } from "../types";
 import { OfflineOrderDraft } from "../types/offlineOrder";
+import { calculateFifoAllocation } from "../utils/fifo";
 
 export type TransactionMode = "sale" | "order";
 
@@ -17,7 +18,7 @@ interface CartState {
   editingDraftIdempotencyKey: string | null;
 
   // Actions
-  addItem: (product: Product, quantity?: number) => boolean;
+  addItem: (product: Product, quantity?: number, allocations?: FifoAllocation[]) => boolean;
   updateQuantity: (productId: string, quantity: number) => void;
   incrementQuantity: (productId: string) => boolean;
   decrementQuantity: (productId: string) => void;
@@ -47,6 +48,7 @@ interface CartState {
   getDueAmount: () => number;
   getBalance: () => number;
   hasStockWarning: () => boolean;
+  hasPricingWarning: () => boolean;
   getItemWarning: (productId: string) => string | null;
   validateCheckout: () => {
     valid: boolean;
@@ -66,7 +68,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   editingDraftId: null,
   editingDraftIdempotencyKey: null,
 
-  addItem: (product: Product, quantity = 1) => {
+  addItem: (product: Product, quantity = 1, customAllocations?: FifoAllocation[]) => {
     const stockAvailable = Number(product.totalStock || 0);
 
     // Rule 1: Cannot add a product with 0 or negative available stock
@@ -74,6 +76,25 @@ export const useCartStore = create<CartState>((set, get) => ({
       return false;
     }
 
+    // Rule 2: Validate authoritative Customer Billing Price (missing/invalid blocks adding)
+    const rawBillingPrice =
+      product.currentBillingPrice !== undefined
+        ? product.currentBillingPrice
+        : (product as any).customerBillingPrice !== undefined
+        ? (product as any).customerBillingPrice
+        : (product as any).billingPrice;
+
+    if (
+      rawBillingPrice === undefined ||
+      rawBillingPrice === null ||
+      isNaN(Number(rawBillingPrice)) ||
+      Number(rawBillingPrice) <= 0
+    ) {
+      return false;
+    }
+
+    const fallbackBilling = Number(rawBillingPrice);
+    const fallbackSelling = Number(product.currentSellingPrice || (product as any).sellingPrice || 0);
     const reqQty = Math.max(1, Math.floor(quantity));
     let success = false;
 
@@ -92,13 +113,25 @@ export const useCartStore = create<CartState>((set, get) => ({
 
         const addQty = Math.min(reqQty, availableToAdd);
         const newQty = currentQty + addQty;
+        const mergedBatches = existingItem.batches || product.batches;
+
+        const fifo = calculateFifoAllocation(
+          mergedBatches,
+          newQty,
+          fallbackBilling,
+          fallbackSelling
+        );
 
         const updated = [...state.items];
         updated[existingIndex] = {
           ...existingItem,
           quantity: newQty,
-          lineTotal: newQty * existingItem.sellingPrice,
-          totalStock: stockAvailable
+          billingPrice: fifo.effectiveUnitPrice,
+          lineTotal: fifo.lineTotal,
+          allocations: fifo.allocations,
+          batches: mergedBatches,
+          totalStock: stockAvailable,
+          isPricingUnavailable: fifo.isPricingUnavailable
         };
         success = true;
         return { items: updated };
@@ -106,6 +139,29 @@ export const useCartStore = create<CartState>((set, get) => ({
 
       // First time adding to cart: Clamp between 1 and available stock
       const initialQty = Math.min(reqQty, stockAvailable);
+      const fifo =
+        customAllocations && customAllocations.length > 0 && initialQty === reqQty
+          ? {
+              allocations: customAllocations,
+              lineTotal:
+                Math.round(
+                  customAllocations.reduce((sum, a) => sum + a.lineTotal, 0) * 100
+                ) / 100,
+              effectiveUnitPrice:
+                initialQty > 0
+                  ? Math.round(
+                      (customAllocations.reduce((sum, a) => sum + a.lineTotal, 0) / initialQty) * 100
+                    ) / 100
+                  : fallbackBilling,
+              isPricingUnavailable: false
+            }
+          : calculateFifoAllocation(
+              product.batches,
+              initialQty,
+              fallbackBilling,
+              fallbackSelling
+            );
+
       const newItem: CartItem = {
         productId: product._id,
         itemCode: product.itemCode,
@@ -113,10 +169,14 @@ export const useCartStore = create<CartState>((set, get) => ({
         displayName: product.displayName || product.productName,
         variant: product.variant,
         quantity: initialQty,
-        sellingPrice: Number(product.currentSellingPrice || 0),
-        lineTotal: initialQty * Number(product.currentSellingPrice || 0),
+        billingPrice: fifo.effectiveUnitPrice,
+        sellingPrice: fallbackSelling,
+        lineTotal: fifo.lineTotal,
         totalStock: stockAvailable,
-        supplier: product.supplier || "Ruhunu Foods"
+        supplier: product.supplier || "Ruhunu Foods",
+        batches: product.batches,
+        allocations: fifo.allocations,
+        isPricingUnavailable: fifo.isPricingUnavailable
       };
 
       success = true;
@@ -134,10 +194,20 @@ export const useCartStore = create<CartState>((set, get) => ({
 
           // Clamp quantity strictly between 1 and available warehouse stock (no silent deletion)
           const clampedQty = Math.max(1, Math.min(item.totalStock, Math.floor(quantity)));
+          const fifo = calculateFifoAllocation(
+            item.batches,
+            clampedQty,
+            item.billingPrice,
+            item.sellingPrice
+          );
+
           return {
             ...item,
             quantity: clampedQty,
-            lineTotal: clampedQty * item.sellingPrice
+            billingPrice: fifo.effectiveUnitPrice,
+            lineTotal: fifo.lineTotal,
+            allocations: fifo.allocations,
+            isPricingUnavailable: fifo.isPricingUnavailable
           };
         })
       };
@@ -157,10 +227,20 @@ export const useCartStore = create<CartState>((set, get) => ({
 
         success = true;
         const newQty = item.quantity + 1;
+        const fifo = calculateFifoAllocation(
+          item.batches,
+          newQty,
+          item.billingPrice,
+          item.sellingPrice
+        );
+
         return {
           ...item,
           quantity: newQty,
-          lineTotal: newQty * item.sellingPrice
+          billingPrice: fifo.effectiveUnitPrice,
+          lineTotal: fifo.lineTotal,
+          allocations: fifo.allocations,
+          isPricingUnavailable: fifo.isPricingUnavailable
         };
       })
     }));
@@ -176,13 +256,24 @@ export const useCartStore = create<CartState>((set, get) => ({
         return { items: state.items.filter((i) => i.productId !== productId) };
       }
 
+      const newQty = item.quantity - 1;
+      const fifo = calculateFifoAllocation(
+        item.batches,
+        newQty,
+        item.billingPrice,
+        item.sellingPrice
+      );
+
       return {
         items: state.items.map((i) =>
           i.productId === productId
             ? {
                 ...i,
-                quantity: i.quantity - 1,
-                lineTotal: (i.quantity - 1) * i.sellingPrice
+                quantity: newQty,
+                billingPrice: fifo.effectiveUnitPrice,
+                lineTotal: fifo.lineTotal,
+                allocations: fifo.allocations,
+                isPricingUnavailable: fifo.isPricingUnavailable
               }
             : i
         )
@@ -260,14 +351,32 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   syncProductStock: (products: Product[]) => {
     set((state) => {
-      const productMap = new Map(products.map((p) => [p._id, Number(p.totalStock || 0)]));
+      const productMap = new Map(products.map((p) => [p._id, p]));
       return {
         items: state.items.map((item) => {
-          const latestStock = productMap.get(item.productId);
-          if (latestStock !== undefined) {
+          const latestProduct = productMap.get(item.productId);
+          if (latestProduct) {
+            const latestStock = Number(latestProduct.totalStock || 0);
+            const latestBatches =
+              Array.isArray(latestProduct.batches) && latestProduct.batches.length > 0
+                ? latestProduct.batches
+                : item.batches;
+            const clampedQty = Math.max(1, Math.min(latestStock, item.quantity));
+            const fifo = calculateFifoAllocation(
+              latestBatches,
+              clampedQty,
+              latestProduct.currentBillingPrice || item.billingPrice,
+              latestProduct.currentSellingPrice || item.sellingPrice
+            );
             return {
               ...item,
-              totalStock: latestStock
+              totalStock: latestStock,
+              batches: latestBatches,
+              quantity: clampedQty,
+              billingPrice: fifo.effectiveUnitPrice,
+              lineTotal: fifo.lineTotal,
+              allocations: fifo.allocations,
+              isPricingUnavailable: fifo.isPricingUnavailable
             };
           }
           return item;
@@ -300,7 +409,15 @@ export const useCartStore = create<CartState>((set, get) => ({
       variant: item.variant || "",
       quantity: item.quantity,
       sellingPrice: item.sellingPrice,
-      lineTotal: item.estimatedLineTotal,
+      billingPrice:
+        item.billingPrice !== undefined && item.billingPrice !== null && Number(item.billingPrice) > 0
+          ? Number(item.billingPrice)
+          : 0,
+      lineTotal:
+        item.quantity *
+        (item.billingPrice !== undefined && item.billingPrice !== null && Number(item.billingPrice) > 0
+          ? Number(item.billingPrice)
+          : 0),
       totalStock: item.totalStockSnapshot || item.quantity,
       supplier: "Ruhunu Foods"
     }));
@@ -405,6 +522,12 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   hasStockWarning: () => {
     return get().items.some((item) => item.totalStock <= 0 || item.quantity > item.totalStock);
+  },
+
+  hasPricingWarning: () => {
+    return get().items.some(
+      (item) => item.isPricingUnavailable || !item.allocations || item.allocations.length === 0
+    );
   },
 
   getItemWarning: (productId: string) => {

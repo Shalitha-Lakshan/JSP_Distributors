@@ -1,5 +1,5 @@
 import { getDatabase } from "../database";
-import { Category, Product } from "../../types";
+import { Category, Product, StockBatch } from "../../types";
 
 export interface CachedProductRow {
   id: string;
@@ -12,6 +12,8 @@ export interface CachedProductRow {
   categoryName: string | null;
   supplier: string;
   currentSellingPrice: number;
+  currentBillingPrice: number;
+  batches: string | null;
   totalStock: number;
   reorderLevel: number;
   isFastMoving: number;
@@ -23,7 +25,8 @@ export const productsRepository = {
   /**
    * Upsert products for a specific authenticated sales rep into SQLite.
    * Parameterized to prevent SQL injection.
-   * EXCLUDES supplier billing price and cost secrets.
+   * Caches customer billing price, reference selling price, and active FIFO batches.
+   * Internal supplier batch acquisition costs remain excluded.
    */
   async upsertProducts(
     userId: string,
@@ -42,12 +45,32 @@ export const productsRepository = {
             ? categoryMap.get(String(p.category)) || null
             : null;
 
+        const rawBillingPrice =
+          p.currentBillingPrice !== undefined
+            ? p.currentBillingPrice
+            : (p as any).customerBillingPrice !== undefined
+            ? (p as any).customerBillingPrice
+            : (p as any).billingPrice || 0;
+        const billingPrice = Number(rawBillingPrice) || 0;
+
+        const rawSellingPrice =
+          p.currentSellingPrice !== undefined
+            ? p.currentSellingPrice
+            : (p as any).sellingPrice || 0;
+        const sellingPrice = Number(rawSellingPrice) || 0;
+
+        const batchesJson =
+          p.batches && Array.isArray(p.batches)
+            ? JSON.stringify(p.batches)
+            : null;
+
         await db.runAsync(
           `INSERT OR REPLACE INTO cached_products (
             id, userId, itemCode, productName, variant, displayName,
             category, categoryName, supplier, currentSellingPrice,
-            totalStock, reorderLevel, isFastMoving, status, lastSyncedAt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            currentBillingPrice, batches, totalStock, reorderLevel, isFastMoving,
+            status, lastSyncedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p._id,
             userId,
@@ -58,7 +81,9 @@ export const productsRepository = {
             p.category ? String(p.category) : null,
             catName,
             p.supplier || "Ruhunu Foods",
-            p.currentSellingPrice,
+            sellingPrice,
+            billingPrice,
+            batchesJson,
             p.totalStock,
             p.reorderLevel || 0,
             p.isFastMoving ? 1 : 0,
@@ -107,21 +132,46 @@ export const productsRepository = {
 
     const rows = await db.getAllAsync<CachedProductRow>(sql, params);
 
-    return rows.map((r) => ({
-      _id: r.id,
-      itemCode: r.itemCode,
-      productName: r.productName,
-      variant: r.variant || "",
-      displayName: r.displayName,
-      category: r.category || "",
-      supplier: (r.supplier as any) || "Ruhunu Foods",
-      currentSellingPrice: r.currentSellingPrice,
-      currentBillingPrice: 0, // Protected: never exposed offline
-      totalStock: r.totalStock,
-      reorderLevel: r.reorderLevel,
-      isFastMoving: Boolean(r.isFastMoving),
-      status: r.status as any
-    }));
+    return rows.map((r) => {
+      const billing = Number(r.currentBillingPrice) || 0;
+      const selling = Number(r.currentSellingPrice) || 0;
+
+      let batches: StockBatch[] = [];
+      if (r.batches) {
+        try {
+          batches = JSON.parse(r.batches);
+        } catch {
+          batches = [];
+        }
+      }
+
+      const activeBatches = batches.filter((b) => Number(b.remainingQty || 0) > 0);
+      const batchPrices = activeBatches.map((b) => Number(b.billingPrice || billing));
+      const minBillingPrice = batchPrices.length > 0 ? Math.min(...batchPrices) : billing;
+      const maxBillingPrice = batchPrices.length > 0 ? Math.max(...batchPrices) : billing;
+      const hasMultiplePrices = minBillingPrice !== maxBillingPrice;
+
+      return {
+        _id: r.id,
+        itemCode: r.itemCode,
+        productName: r.productName,
+        variant: r.variant || "",
+        displayName: r.displayName,
+        category: r.category || "",
+        supplier: (r.supplier as any) || "Ruhunu Foods",
+        currentSellingPrice: selling,
+        currentBillingPrice: billing,
+        customerBillingPrice: billing,
+        batches,
+        minBillingPrice,
+        maxBillingPrice,
+        hasMultiplePrices,
+        totalStock: r.totalStock,
+        reorderLevel: r.reorderLevel,
+        isFastMoving: Boolean(r.isFastMoving),
+        status: r.status as any
+      };
+    });
   },
 
   /**

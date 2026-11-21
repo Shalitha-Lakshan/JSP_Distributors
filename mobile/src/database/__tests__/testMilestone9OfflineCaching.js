@@ -34,14 +34,15 @@ console.log("PASS: All 5 required offline tables successfully created with WAL m
 console.log("\n--- TEST 2: Security & Sensitive Field Exclusion ---");
 const productColumns = db.prepare("PRAGMA table_info(cached_products)").all().map(c => c.name);
 console.log("cached_products columns:", productColumns);
-assert(!productColumns.includes("currentBillingPrice"), "currentBillingPrice must NOT exist in SQLite");
-assert(!productColumns.includes("billingPrice"), "billingPrice must NOT exist in SQLite");
+assert(productColumns.includes("currentBillingPrice"), "currentBillingPrice must exist in SQLite for offline order booking");
 assert(!productColumns.includes("supplierCost"), "supplierCost must NOT exist in SQLite");
+assert(!productColumns.includes("batchSupplierPrice"), "batchSupplierPrice must NOT exist in SQLite");
+assert(!productColumns.includes("purchasePrice"), "purchasePrice must NOT exist in SQLite");
 
 const customerColumns = db.prepare("PRAGMA table_info(cached_customers)").all().map(c => c.name);
 assert(!customerColumns.includes("password"), "password must NOT exist in SQLite");
 assert(!customerColumns.includes("token"), "token must NOT exist in SQLite");
-console.log("PASS: Strict security exclusions verified. No confidential billing prices or secrets in local database.");
+console.log("PASS: Strict security exclusions verified. Customer billing price cached; internal supplier costs and credentials excluded.");
 
 console.log("\n--- TEST 3: User Partitioning & Account Isolation ---");
 const user1 = "rep_user_001";
@@ -52,24 +53,24 @@ const now = new Date().toISOString();
 const insertProductStmt = db.prepare(`
   INSERT INTO cached_products (
     id, userId, itemCode, productName, variant, displayName,
-    category, categoryName, supplier, currentSellingPrice,
+    category, categoryName, supplier, currentSellingPrice, currentBillingPrice,
     totalStock, reorderLevel, isFastMoving, status, lastSyncedAt
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 insertProductStmt.run(
   "prod_1", user1, "R-SAM-01", "Ruhunu Samaposha", "200g", "Ruhunu Samaposha 200g",
-  "cat_1", "Grains", "Ruhunu Foods", 240.0, 50, 10, 1, "active", now
+  "cat_1", "Grains", "Ruhunu Foods", 240.0, 200.0, 50, 10, 1, "active", now
 );
 insertProductStmt.run(
   "prod_2", user1, "R-CHI-01", "Ruhunu Chilli Powder", "100g", "Ruhunu Chilli Powder 100g",
-  "cat_2", "Spices", "Ruhunu Foods", 180.0, 80, 15, 0, "active", now
+  "cat_2", "Spices", "Ruhunu Foods", 180.0, 150.0, 80, 15, 0, "active", now
 );
 
 // Insert product for User 2
 insertProductStmt.run(
   "prod_3", user2, "G-PAP-01", "Gajamuthu Papadam", "100g", "Gajamuthu Papadam 100g",
-  "cat_3", "Snacks", "Gajamuthu Foods", 120.0, 40, 5, 0, "active", now
+  "cat_3", "Snacks", "Gajamuthu Foods", 120.0, 100.0, 40, 5, 0, "active", now
 );
 
 // Query User 1 products
@@ -122,7 +123,7 @@ console.log("\n--- TEST 5: Parameterized Search & SQL Injection Protection ---")
 // Re-insert product for User 1
 insertProductStmt.run(
   "prod_1", user1, "R-SAM-01", "Ruhunu Samaposha", "200g", "Ruhunu Samaposha 200g",
-  "cat_1", "Grains", "Ruhunu Foods", 240.0, 50, 10, 1, "active", now
+  "cat_1", "Grains", "Ruhunu Foods", 240.0, 200.0, 50, 10, 1, "active", now
 );
 
 // Normal Search by partial code

@@ -64,6 +64,30 @@ export interface Category {
   status: "active" | "inactive";
 }
 
+export interface StockBatch {
+  _id: string;
+  batchNo: string;
+  productId: string;
+  billingPrice: number;
+  sellingPrice: number;
+  quantity: number;
+  remainingQty: number;
+  expiryDate?: string;
+  receivedDate: string;
+  createdAt?: string;
+}
+
+export interface FifoAllocation {
+  batchId: string;
+  batchNo: string;
+  label?: string; // "F1", "F2", etc.
+  quantity: number;
+  qty?: number; // Backend snapshot property
+  billingPrice: number;
+  sellingPrice?: number;
+  lineTotal: number;
+}
+
 export interface Product {
   _id: string;
   barcode?: string;
@@ -74,12 +98,17 @@ export interface Product {
   category: string | Category;
   searchKeywords?: string[];
   currentSellingPrice: number;
-  currentBillingPrice?: number; // Only for managers/admin
+  currentBillingPrice: number; // Customer Billing Price (authoritative)
+  customerBillingPrice?: number; // Customer Billing Price alias
   totalStock: number;
   reorderLevel: number;
   isFastMoving: boolean;
   status: "active" | "inactive";
   supplier: "Ruhunu Foods" | "Gajamuthu Foods";
+  batches?: StockBatch[];
+  minBillingPrice?: number;
+  maxBillingPrice?: number;
+  hasMultiplePrices?: boolean;
 }
 
 export type CustomerType = "walk-in" | "retail" | "wholesale" | "credit";
@@ -232,10 +261,14 @@ export interface CartItem {
   displayName: string;
   variant: string;
   quantity: number;
+  billingPrice: number;
   sellingPrice: number;
   lineTotal: number;
   totalStock: number;
   supplier: "Ruhunu Foods" | "Gajamuthu Foods";
+  batches?: StockBatch[];
+  allocations?: FifoAllocation[];
+  isPricingUnavailable?: boolean;
 }
 
 export interface SaleItem {
@@ -243,9 +276,10 @@ export interface SaleItem {
   itemCode: string;
   itemName: string;
   quantity: number;
+  billingPrice: number;
   sellingPrice: number;
-  billingPrice?: number;
   lineTotal: number;
+  usedBatches?: FifoAllocation[];
 }
 
 export interface ReturnItem {
@@ -298,7 +332,10 @@ export interface OrderItem {
   itemName: string;
   quantity: number;
   unitPrice: number;
+  billingPrice?: number;
+  sellingPrice?: number;
   lineTotal: number;
+  usedBatches?: FifoAllocation[];
 }
 
 export interface Order {

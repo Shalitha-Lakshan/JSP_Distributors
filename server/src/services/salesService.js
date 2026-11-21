@@ -66,25 +66,61 @@ const createSaleFromPayload = async ({
         throw new Error("Reserved stock does not cover requested quantity");
       }
 
-      const billingTotal = usedBatches.reduce((sum, batch) => sum + batch.qty * batch.billingPrice, 0);
+      // Customer billing unit price from authorized snapshot or catalogue
+      const billingUnitPrice =
+        item.billingPrice !== undefined && item.billingPrice !== null
+          ? Number(item.billingPrice)
+          : item.unitPrice !== undefined && item.unitPrice !== null
+          ? Number(item.unitPrice)
+          : Number(product.currentBillingPrice || 0);
+
+      if (billingUnitPrice <= 0 || isNaN(billingUnitPrice)) {
+        throw new Error(`Billing price unavailable or invalid for product ${product.itemCode}`);
+      }
+
+      // Reference selling unit price snapshot
+      const sellingUnitPrice =
+        item.sellingPrice !== undefined && item.sellingPrice !== null
+          ? Number(item.sellingPrice)
+          : Number(product.currentSellingPrice || 0);
+
+      const lineTotal = Math.round(qtyNeeded * billingUnitPrice * 100) / 100;
 
       normalizedItems.push({
         product: product._id,
         itemCode: item.itemCode || product.itemCode,
         itemName: item.itemName || product.displayName,
         quantity: qtyNeeded,
-        sellingPrice: billingTotal / qtyNeeded,
-        billingPrice: billingTotal / qtyNeeded,
-        lineTotal: billingTotal,
+        sellingPrice: sellingUnitPrice,
+        billingPrice: billingUnitPrice,
+        lineTotal,
         usedBatches
       });
       continue;
     }
 
+    // Direct POS sale: validate product customer billing price
+    const rawBillingPrice =
+      product.currentBillingPrice !== undefined
+        ? product.currentBillingPrice
+        : product.customerBillingPrice;
+
+    if (
+      rawBillingPrice === undefined ||
+      rawBillingPrice === null ||
+      isNaN(Number(rawBillingPrice)) ||
+      Number(rawBillingPrice) <= 0
+    ) {
+      throw new Error(`Billing price unavailable or invalid for product ${product.itemCode} (${product.displayName})`);
+    }
+
+    const billingUnitPrice = Number(rawBillingPrice);
+    const sellingUnitPrice = Number(product.currentSellingPrice || 0);
+
     const batches = await StockBatch.find({
       productId: item.productId,
       remainingQty: { $gt: 0 }
-    }).sort({ receivedDate: 1 });
+    }).sort({ receivedDate: 1, createdAt: 1, _id: 1 });
 
     const totalBatchAvailable = batches.reduce((sum, b) => sum + Number(b.remainingQty || 0), 0);
     if (totalBatchAvailable < qtyNeeded) {
@@ -101,7 +137,6 @@ const createSaleFromPayload = async ({
 
     let remaining = qtyNeeded;
     const usedBatches = [];
-    let billingTotal = 0;
 
     for (const batch of batches) {
       if (remaining <= 0) {
@@ -112,8 +147,6 @@ const createSaleFromPayload = async ({
       remaining -= takeQty;
       const batchBilling = Number(batch.billingPrice || 0);
       const batchSelling = Number(batch.sellingPrice || product.currentSellingPrice || 0);
-
-      billingTotal += takeQty * batchBilling;
 
       usedBatches.push({
         batchId: batch._id,
@@ -143,14 +176,20 @@ const createSaleFromPayload = async ({
       throw err;
     }
 
+    const batchLineTotalSum = usedBatches.reduce((sum, b) => sum + Number(b.lineTotal || 0), 0);
+    const lineTotal = usedBatches.length > 0 && batchLineTotalSum > 0
+      ? Math.round(batchLineTotalSum * 100) / 100
+      : Math.round(qtyNeeded * billingUnitPrice * 100) / 100;
+    const effectiveBillingPrice = Math.round((lineTotal / qtyNeeded) * 100) / 100;
+
     normalizedItems.push({
       product: product._id,
       itemCode: item.itemCode || product.itemCode,
       itemName: item.itemName || product.displayName,
       quantity: qtyNeeded,
-      sellingPrice: billingTotal / qtyNeeded,
-      billingPrice: billingTotal / qtyNeeded,
-      lineTotal: billingTotal,
+      sellingPrice: sellingUnitPrice,
+      billingPrice: effectiveBillingPrice,
+      lineTotal,
       usedBatches
     });
 

@@ -103,6 +103,7 @@ export default function CartScreen() {
     getDueAmount,
     getBalance,
     hasStockWarning,
+    hasPricingWarning,
     validateCheckout,
     syncProductStock
   } = useCartStore();
@@ -387,8 +388,41 @@ export default function CartScreen() {
       });
     },
     onSuccess: (order) => {
+      // Enrich confirmed order items with batch selling price snapshots
+      const enrichedItems = (order.items || []).map((ordItem) => {
+        const pId = typeof ordItem.productId === "object" ? ordItem.productId?._id : ordItem.productId;
+        const cartItem = items.find((ci) => ci.productId === pId);
+        if (!cartItem) return ordItem;
+        return {
+          ...ordItem,
+          sellingPrice: ordItem.sellingPrice || cartItem.sellingPrice,
+          batches: cartItem.batches,
+          usedBatches: (ordItem.usedBatches && ordItem.usedBatches.length > 0)
+            ? ordItem.usedBatches.map((ub) => {
+                const alloc = cartItem.allocations?.find(
+                  (a) => a.batchNo === ub.batchNo || a.batchId === String(ub.batchId)
+                );
+                return {
+                  ...ub,
+                  quantity: (ub as any).quantity ?? ub.qty ?? 0,
+                  sellingPrice: ub.sellingPrice || alloc?.sellingPrice
+                };
+              })
+            : (cartItem.allocations || []).map((a) => ({
+                batchId: a.batchId,
+                batchNo: a.batchNo,
+                label: a.label,
+                quantity: a.quantity ?? a.qty ?? 0,
+                qty: a.qty ?? a.quantity ?? 0,
+                billingPrice: a.billingPrice,
+                sellingPrice: a.sellingPrice,
+                lineTotal: a.lineTotal
+              }))
+        };
+      });
+
       setIsSubmitting(false);
-      setConfirmedOrder(order);
+      setConfirmedOrder({ ...order, items: enrichedItems });
       clearCart();
       queryClient.invalidateQueries({ queryKey: ["orders"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -1037,15 +1071,25 @@ export default function CartScreen() {
                           : `Save Offline Draft (${formatLKR(netTotal)})`
                         : hasStockWarning()
                         ? "Stock Unavailable - Adjust Cart"
+                        : hasPricingWarning()
+                        ? "FIFO Pricing Unavailable"
                         : isSaleMode
                         ? `Confirm Sale (${formatLKR(netTotal)})`
                         : `Book Order (${items.length} items)`
                     }
                     variant="primary"
                     size="lg"
-                    disabled={isSubmitting || !activeTrip || (!isOfflineMode && hasStockWarning())}
+                    disabled={
+                      isSubmitting ||
+                      !activeTrip ||
+                      (!isOfflineMode && hasStockWarning()) ||
+                      hasPricingWarning()
+                    }
                     onPress={handleCheckout}
-                    style={[styles.checkoutBtn, !isOfflineMode && hasStockWarning() && { opacity: 0.6 }]}
+                    style={[
+                      styles.checkoutBtn,
+                      ((!isOfflineMode && hasStockWarning()) || hasPricingWarning()) && { opacity: 0.6 }
+                    ]}
                   />
                 </View>
               </ScrollView>
@@ -1371,15 +1415,25 @@ export default function CartScreen() {
                     : `Save Offline Draft (${formatLKR(netTotal)})`
                   : hasStockWarning()
                   ? "Stock Unavailable - Adjust Cart"
+                  : hasPricingWarning()
+                  ? "FIFO Pricing Unavailable"
                   : isSaleMode
                   ? `Confirm Sale (${formatLKR(netTotal)})`
                   : `Book Order (${items.length} items)`
               }
               variant="primary"
               size="lg"
-              disabled={isSubmitting || !activeTrip || (!isOfflineMode && hasStockWarning())}
+              disabled={
+                isSubmitting ||
+                !activeTrip ||
+                (!isOfflineMode && hasStockWarning()) ||
+                hasPricingWarning()
+              }
               onPress={handleCheckout}
-              style={[styles.checkoutBtn, !isOfflineMode && hasStockWarning() && { opacity: 0.6 }]}
+              style={[
+                styles.checkoutBtn,
+                ((!isOfflineMode && hasStockWarning()) || hasPricingWarning()) && { opacity: 0.6 }
+              ]}
             />
           </View>
         )}

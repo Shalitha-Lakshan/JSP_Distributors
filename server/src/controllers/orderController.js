@@ -7,7 +7,7 @@ const TripSession = require("../models/TripSession");
 const { createSaleFromPayload } = require("../services/salesService");
 const Counter = require("../models/Counter");
 
-const reserveStockForItems = async (items) => {
+const reserveStockForItems = async (items, preservedPricesMap = null) => {
   const orderItems = [];
   const batchUpdates = [];
   const stockUpdates = new Map();
@@ -31,10 +31,44 @@ const reserveStockForItems = async (items) => {
       throw new Error("Quantity must be greater than 0");
     }
 
+    let unitPrice;
+    let sellingPrice;
+
+    if (preservedPricesMap && preservedPricesMap.has(item.productId.toString())) {
+      const preserved = preservedPricesMap.get(item.productId.toString());
+      unitPrice = preserved.unitPrice;
+      sellingPrice =
+        preserved.sellingPrice !== undefined
+          ? preserved.sellingPrice
+          : Number(product.currentSellingPrice || 0);
+    } else {
+      const rawBillingPrice =
+        product.currentBillingPrice !== undefined
+          ? product.currentBillingPrice
+          : product.customerBillingPrice;
+
+      if (
+        rawBillingPrice === undefined ||
+        rawBillingPrice === null ||
+        isNaN(Number(rawBillingPrice)) ||
+        Number(rawBillingPrice) <= 0
+      ) {
+        const err = new Error(
+          `Billing price unavailable or invalid for product ${product.itemCode} (${product.displayName}). Adding to bill is blocked.`
+        );
+        err.status = 400;
+        err.statusCode = 400;
+        throw err;
+      }
+
+      unitPrice = Number(rawBillingPrice);
+      sellingPrice = Number(product.currentSellingPrice || 0);
+    }
+
     const batches = await StockBatch.find({
       productId: item.productId,
       remainingQty: { $gt: 0 }
-    }).sort({ receivedDate: 1 });
+    }).sort({ receivedDate: 1, createdAt: 1, _id: 1 });
 
     const totalBatchAvailable = batches.reduce((sum, b) => sum + Number(b.remainingQty || 0), 0);
     if (totalBatchAvailable < quantity) {
@@ -50,7 +84,6 @@ const reserveStockForItems = async (items) => {
     }
 
     let remaining = quantity;
-    let lineTotal = 0;
     const usedBatches = [];
 
     for (const batch of batches) {
@@ -60,14 +93,16 @@ const reserveStockForItems = async (items) => {
 
       const takeQty = Math.min(batch.remainingQty, remaining);
       remaining -= takeQty;
-      const batchTotal = takeQty * Number(batch.billingPrice || 0);
-      lineTotal += batchTotal;
+      const batchCost = Number(batch.billingPrice || 0);
+      const batchSelling = Number(batch.sellingPrice || 0);
+      const batchTotal = takeQty * batchCost;
 
       usedBatches.push({
         batchId: batch._id,
         batchNo: batch.batchNo,
         qty: takeQty,
-        billingPrice: Number(batch.billingPrice || 0),
+        billingPrice: batchCost,
+        sellingPrice: batchSelling,
         lineTotal: batchTotal
       });
 
@@ -89,12 +124,21 @@ const reserveStockForItems = async (items) => {
       throw err;
     }
 
+    const batchLineTotalSum = usedBatches.reduce((sum, b) => sum + Number(b.lineTotal || 0), 0);
+    const lineTotal = usedBatches.length > 0 && batchLineTotalSum > 0
+      ? Math.round(batchLineTotalSum * 100) / 100
+      : Math.round(quantity * unitPrice * 100) / 100;
+
+    const effectiveUnitPrice = Math.round((lineTotal / quantity) * 100) / 100;
+
     orderItems.push({
       productId: product._id,
       itemCode: product.itemCode,
       itemName: product.displayName,
       quantity,
-      unitPrice: quantity > 0 ? lineTotal / quantity : 0,
+      unitPrice: effectiveUnitPrice,
+      billingPrice: effectiveUnitPrice,
+      sellingPrice,
       lineTotal,
       usedBatches
     });
@@ -420,7 +464,8 @@ const listOrders = async (req, res) => {
     .populate("customer", "name phone address customerType")
     .populate("cashier", "name")
     .populate("tripId", "route")
-    .populate({ path: "items.productId", select: "supplier" })
+    .populate({ path: "items.productId", select: "supplier currentSellingPrice currentBillingPrice displayName itemCode" })
+    .populate({ path: "items.usedBatches.batchId", select: "sellingPrice billingPrice batchNo" })
     .populate("saleId", "paymentMethod")
     .sort({ createdAt: -1 });
   return res.json(orders);
@@ -431,7 +476,8 @@ const getOrder = async (req, res) => {
     .populate("customer", "name phone address customerType")
     .populate("cashier", "name")
     .populate("tripId", "route")
-    .populate({ path: "items.productId", select: "supplier" })
+    .populate({ path: "items.productId", select: "supplier currentSellingPrice currentBillingPrice displayName itemCode" })
+    .populate({ path: "items.usedBatches.batchId", select: "sellingPrice billingPrice batchNo" })
     .populate("saleId", "paymentMethod");
 
   if (!order) {
@@ -472,33 +518,146 @@ const updateOrder = async (req, res) => {
   order.returnTotal = returnTotalVal;
 
   if (items.length > 0) {
-    try {
-      if (order.stockReserved) {
-        await restoreReservedStock(order.items);
+    // 1. Build existing item map to preserve authorized historical prices
+    const existingItemMap = new Map();
+    order.items.forEach((it) => {
+      existingItemMap.set(it.productId.toString(), it);
+    });
+
+    const preservedPricesMap = new Map();
+
+    // 2. Validate all products, quantities, prices, and stock BEFORE database mutation
+    for (const item of items) {
+      if (!item.productId || !item.quantity) {
+        return res.status(400).json({ message: "Product and quantity are required" });
       }
 
-      const { orderItems, batchUpdates, stockUpdates } = await reserveStockForItems(items);
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        return res.status(404).json({ message: `Product ${item.productId} not found` });
+      }
+
+      if (product.status !== "active") {
+        return res.status(400).json({ message: `Product ${product.itemCode} is inactive` });
+      }
+
+      const qty = Number(item.quantity);
+      if (qty <= 0) {
+        return res.status(400).json({ message: "Quantity must be greater than 0" });
+      }
+
+      if (existingItemMap.has(item.productId.toString())) {
+        const existing = existingItemMap.get(item.productId.toString());
+        const preservedUnitPrice =
+          existing.billingPrice !== undefined && existing.billingPrice !== null
+            ? Number(existing.billingPrice)
+            : Number(existing.unitPrice);
+        const preservedSellingPrice =
+          existing.sellingPrice !== undefined && existing.sellingPrice !== null
+            ? Number(existing.sellingPrice)
+            : Number(product.currentSellingPrice || 0);
+
+        preservedPricesMap.set(item.productId.toString(), {
+          unitPrice: preservedUnitPrice,
+          sellingPrice: preservedSellingPrice
+        });
+      } else {
+        // New product added to order: validate authoritative Customer Billing Price
+        const rawBillingPrice =
+          product.currentBillingPrice !== undefined
+            ? product.currentBillingPrice
+            : product.customerBillingPrice;
+
+        if (
+          rawBillingPrice === undefined ||
+          rawBillingPrice === null ||
+          isNaN(Number(rawBillingPrice)) ||
+          Number(rawBillingPrice) <= 0
+        ) {
+          return res.status(400).json({
+            message: `Billing price unavailable or invalid for product ${product.itemCode} (${product.displayName}). Cannot add to order.`
+          });
+        }
+
+        preservedPricesMap.set(item.productId.toString(), {
+          unitPrice: Number(rawBillingPrice),
+          sellingPrice: Number(product.currentSellingPrice || 0)
+        });
+      }
+
+      // Check stock availability without mutating
+      const currentlyReserved = existingItemMap.has(item.productId.toString())
+        ? existingItemMap.get(item.productId.toString()).quantity
+        : 0;
+      const netAdditionalNeeded = qty - currentlyReserved;
+
+      if (netAdditionalNeeded > 0) {
+        const availableBatches = await StockBatch.find({
+          productId: item.productId,
+          remainingQty: { $gt: 0 }
+        });
+        const totalBatchAvailable = availableBatches.reduce(
+          (sum, b) => sum + Number(b.remainingQty || 0),
+          0
+        );
+        if (totalBatchAvailable < netAdditionalNeeded) {
+          return res.status(409).json({
+            message: `Insufficient stock for ${product.itemCode} (${product.displayName}). Available: ${totalBatchAvailable}, additional requested: ${netAdditionalNeeded}`,
+            itemCode: product.itemCode,
+            availableQuantity: totalBatchAvailable,
+            requestedQuantity: netAdditionalNeeded
+          });
+        }
+      }
+    }
+
+    // 3. Perform reservation transition safely:
+    // If any error occurs during reserveStockForItems, restore original reserved stock so allocations are preserved
+    const previousItems = order.items;
+    try {
+      if (order.stockReserved) {
+        await restoreReservedStock(previousItems);
+      }
+
+      const { orderItems, batchUpdates, stockUpdates } = await reserveStockForItems(
+        items,
+        preservedPricesMap
+      );
 
       if (batchUpdates.length > 0) {
-        await StockBatch.bulkWrite(batchUpdates);
+        for (const update of batchUpdates) {
+          await StockBatch.findByIdAndUpdate(update.batchId, {
+            $inc: { remainingQty: -update.takeQty }
+          });
+        }
       }
 
       if (stockUpdates.size > 0) {
-        await Product.bulkWrite(
-          [...stockUpdates.entries()].map(([productId, qty]) => ({
-            updateOne: {
-              filter: { _id: productId },
-              update: { $inc: { totalStock: -qty } }
-            }
-          }))
-        );
+        for (const [productId, qty] of stockUpdates.entries()) {
+          await Product.findByIdAndUpdate(productId, {
+            $inc: { totalStock: -qty }
+          });
+        }
       }
 
       order.items = orderItems;
       order.orderTotal = orderItems.reduce((sum, item) => sum + item.lineTotal, 0);
       order.stockReserved = true;
     } catch (err) {
-      return res.status(400).json({ message: err.message || "Failed to update order" });
+      if (order.stockReserved) {
+        try {
+          const { batchUpdates, stockUpdates } = await reserveStockForItems(previousItems, preservedPricesMap);
+          for (const update of batchUpdates) {
+            await StockBatch.findByIdAndUpdate(update.batchId, { $inc: { remainingQty: -update.takeQty } });
+          }
+          for (const [productId, qty] of stockUpdates.entries()) {
+            await Product.findByIdAndUpdate(productId, { $inc: { totalStock: -qty } });
+          }
+        } catch {}
+      }
+      return res.status(err.status || err.statusCode || 400).json({
+        message: err.message || "Failed to update order"
+      });
     }
   }
 
@@ -580,26 +739,55 @@ const deliverOrder = async (req, res) => {
     }
   }
 
+  const orderItemMap = new Map(
+    order.items.map((item) => [item.productId.toString(), item])
+  );
+
   const deliveredItems = order.stockReserved
     ? order.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
         itemCode: item.itemCode,
         itemName: item.itemName,
+        billingPrice:
+          item.billingPrice !== undefined && item.billingPrice !== null
+            ? item.billingPrice
+            : item.unitPrice,
+        sellingPrice: item.sellingPrice,
+        unitPrice: item.unitPrice,
         usedBatches: item.usedBatches || []
       }))
     : items.length
-      ? items
+      ? items.map((item) => {
+          const orderItem = orderItemMap.get(String(item.productId));
+          return {
+            productId: item.productId,
+            quantity: item.quantity,
+            itemCode: item.itemCode || orderItem?.itemCode,
+            itemName: item.itemName || orderItem?.itemName,
+            billingPrice: orderItem
+              ? orderItem.billingPrice !== undefined && orderItem.billingPrice !== null
+                ? orderItem.billingPrice
+                : orderItem.unitPrice
+              : undefined,
+            sellingPrice: orderItem ? orderItem.sellingPrice : undefined,
+            unitPrice: orderItem ? orderItem.unitPrice : undefined,
+            usedBatches: orderItem?.usedBatches || []
+          };
+        })
       : order.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
           itemCode: item.itemCode,
-          itemName: item.itemName
+          itemName: item.itemName,
+          billingPrice:
+            item.billingPrice !== undefined && item.billingPrice !== null
+              ? item.billingPrice
+              : item.unitPrice,
+          sellingPrice: item.sellingPrice,
+          unitPrice: item.unitPrice,
+          usedBatches: item.usedBatches || []
         }));
-
-  const orderItemMap = new Map(
-    order.items.map((item) => [item.productId.toString(), item])
-  );
   let missingItem = false;
   const orderTotal = deliveredItems.reduce((sum, item) => {
     const orderItem = orderItemMap.get(String(item.productId));
